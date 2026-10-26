@@ -2,26 +2,30 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { useLayoutEffect, useRef } from 'react'
 import { Vector3 } from 'three'
 
+import { live } from '../store/live'
+import { useQuality } from '../store/qualityStore'
 import { LIGHTS } from './sceneStyle'
 
 const SUN_DIRECTION = new Vector3(...LIGHTS.sunDirection).normalize()
 /** How far back along SUN_DIRECTION the light sits from the point it shadows. */
 const SUN_DISTANCE = 60
+const SUN_START = SUN_DIRECTION.clone().multiplyScalar(SUN_DISTANCE).toArray()
 /** Half-size of the square area around the player that receives shadows. */
-const SHADOW_EXTENT = 24
+const SHADOW_EXTENT = 26
 
 /**
- * Bright, even daylight: a white hemisphere fill and a warm sun with soft shadows.
+ * Bright, even daylight: a hemisphere fill and a warm sun with soft shadows.
  *
  * A directional light's shadow only covers a fixed box around its target, so the sun
- * and its target are moved with the player every frame. Otherwise shadows would exist
- * only near the world origin and disappear a few steps down the track.
+ * and its target follow the player every frame. Shadows are off entirely on the LOW
+ * preset (blob shadows under spinners still read fine there).
  *
- * @param {{ followRef: React.MutableRefObject<any> }} props the player's rigid body
+ * @param {{ theme: object }} props zone theme from sceneStyle.THEMES
  */
-export function Lighting({ followRef }) {
+export function Lighting({ theme }) {
   const sunRef = useRef(null)
   const scene = useThree((s) => s.scene)
+  const q = useQuality()
 
   useLayoutEffect(() => {
     const sun = sunRef.current
@@ -41,28 +45,30 @@ export function Lighting({ followRef }) {
     return () => {
       scene.remove(sun.target)
     }
-  }, [scene])
+  }, [scene, q.shadows, q.shadowMapSize])
 
   useFrame(() => {
     const sun = sunRef.current
-    const body = followRef.current
-    if (!sun || !body) return
-
-    const p = body.translation()
-    sun.target.position.set(p.x, 0, p.z)
+    if (!sun) return
+    // Snap to a grid so shadow edges don't shimmer as the player walks.
+    const x = Math.round(live.player.x)
+    const z = Math.round(live.player.z)
+    sun.target.position.set(x, 0, z)
     sun.position.copy(sun.target.position).addScaledVector(SUN_DIRECTION, SUN_DISTANCE)
   })
 
   return (
     <>
-      <hemisphereLight args={[LIGHTS.hemiSky, LIGHTS.hemiGround, LIGHTS.hemiIntensity]} />
+      <hemisphereLight args={[LIGHTS.hemiSky, LIGHTS.hemiGround, theme.hemi]} />
       <directionalLight
+        // Remount when the shadow map size changes; three won't resize a live one.
+        key={`${q.shadows}-${q.shadowMapSize}`}
         ref={sunRef}
-        castShadow
-        color={LIGHTS.sunColor}
-        intensity={LIGHTS.sunIntensity}
-        position={SUN_DIRECTION.clone().multiplyScalar(SUN_DISTANCE).toArray()}
-        shadow-mapSize={[2048, 2048]}
+        castShadow={q.shadows}
+        color={theme.sunColor}
+        intensity={theme.sun}
+        position={SUN_START}
+        shadow-mapSize={[q.shadowMapSize || 512, q.shadowMapSize || 512]}
         shadow-radius={LIGHTS.shadowSoftness}
         shadow-intensity={LIGHTS.shadowIntensity}
         shadow-bias={-0.0005}

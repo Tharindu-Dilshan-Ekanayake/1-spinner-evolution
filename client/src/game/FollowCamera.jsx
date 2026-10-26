@@ -1,93 +1,107 @@
-import { useFrame, useThree } from '@react-three/fiber'
+import { useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
 import { Vector3 } from 'three'
 
-/** How high above the player's origin the camera aims. */
-const LOOK_HEIGHT = 1.4
+import { live } from '../store/live'
+import { cameraClearance } from './collision'
+import { ORDER, useSystem } from './loop'
 
-const MIN_DISTANCE = 3
-const MAX_DISTANCE = 20
-const START_DISTANCE = 8
+/** How high above the player's origin the camera aims. */
+const LOOK_HEIGHT = 1.6
+
+const MIN_DISTANCE = 4
+const MAX_DISTANCE = 30
 
 // Pitch limits, in radians. Stops the camera flipping over the top or sinking
-// under the track.
-const MIN_PITCH = -0.15
-const MAX_PITCH = 1.25
-const START_PITCH = 0.32
+// under the ground.
+const MIN_PITCH = -0.1
+const MAX_PITCH = 1.3
 
-const DRAG_SENSITIVITY = 0.005
-const ZOOM_SENSITIVITY = 0.01
+const DRAG_SENSITIVITY = 0.006
+const ZOOM_SENSITIVITY = 0.012
+/** Pixels a press may move and still count as a click (training / battle boost). */
+const CLICK_SLOP = 8
 
 // Higher = snappier. Framerate-independent via the pow() smoothing below.
-const POSITION_SMOOTHING = 4
-const LOOK_SMOOTHING = 8
+const POSITION_SMOOTHING = 6
+const LOOK_SMOOTHING = 9
 
 const _desired = new Vector3()
 const _target = new Vector3()
 
 /**
- * Third-person orbit camera.
+ * Third-person orbit camera, plus a fixed overhead view during battles.
  *
- * Trails the player's rigid body, easing both position and look-at target.
- * Right-click drag orbits, the mouse wheel zooms.
+ * Desktop: drag (left or right button) orbits, the wheel zooms, a click without a
+ * drag is a "tap" (boost while training or fighting). Touch: one finger orbits,
+ * two fingers pinch-zoom, a quick tap is a tap. The joystick and HUD buttons sit
+ * above the canvas, so their touches never reach this handler.
  *
- * Reads the Rapier body directly rather than React state - the body is the
- * authoritative transform and updates every physics step, not every render.
- *
- * @param {{ bodyRef: React.MutableRefObject<any> }} props
+ * @param {{ onTap: () => void }} props
  */
-export function FollowCamera({ bodyRef }) {
+export function FollowCamera({ onTap }) {
   const camera = useThree((s) => s.camera)
   const gl = useThree((s) => s.gl)
-
-  // Spherical offset from the player. A ref, not state: pointer events write to it
-  // every mousemove and the frame loop reads it - re-rendering would be wasteful.
-  const orbit = useRef({ yaw: 0, pitch: START_PITCH, distance: START_DISTANCE })
   const lookAt = useRef(new Vector3())
   const initialised = useRef(false)
+  const lastWarp = useRef(0)
 
   useEffect(() => {
     const el = gl.domElement
-    if (!el) return
+    if (!el) return undefined
 
-    let dragging = false
-    let lastX = 0
-    let lastY = 0
+    const pointers = new Map()
+    let pinchStart = 0
+    let pinchDistance = 0
 
     const onPointerDown = (e) => {
-      if (e.button !== 2) return // right button only
-      dragging = true
-      lastX = e.clientX
-      lastY = e.clientY
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false })
       el.setPointerCapture?.(e.pointerId)
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()]
+        pinchStart = Math.hypot(a.x - b.x, a.y - b.y)
+        pinchDistance = live.camera.distance
+      }
     }
 
     const onPointerMove = (e) => {
-      if (!dragging) return
-      const dx = e.clientX - lastX
-      const dy = e.clientY - lastY
-      lastX = e.clientX
-      lastY = e.clientY
+      const p = pointers.get(e.pointerId)
+      if (!p) return
+      const dx = e.clientX - p.x
+      const dy = e.clientY - p.y
+      p.x = e.clientX
+      p.y = e.clientY
+      if (Math.hypot(p.x - p.sx, p.y - p.sy) > CLICK_SLOP) p.moved = true
 
-      const o = orbit.current
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()]
+        const d = Math.hypot(a.x - b.x, a.y - b.y)
+        if (pinchStart > 0) {
+          live.camera.distance = Math.min(MAX_DISTANCE, Math.max(MIN_DISTANCE, pinchDistance * (pinchStart / d)))
+        }
+        return
+      }
+      if (!p.moved || live.camera.mode === 'battle') return
+      const o = live.camera
       o.yaw -= dx * DRAG_SENSITIVITY
       o.pitch = Math.min(MAX_PITCH, Math.max(MIN_PITCH, o.pitch + dy * DRAG_SENSITIVITY))
     }
 
-    const endDrag = (e) => {
-      if (!dragging) return
-      dragging = false
+    const endPointer = (e) => {
+      const p = pointers.get(e.pointerId)
+      if (!p) return
+      pointers.delete(e.pointerId)
       el.releasePointerCapture?.(e.pointerId)
+      if (e.type === 'pointerup' && !p.moved && pointers.size === 0 && e.button !== 2) {
+        onTap?.()
+      }
     }
 
     const onWheel = (e) => {
       // Without this the page scrolls behind the canvas.
       e.preventDefault()
-      const o = orbit.current
-      o.distance = Math.min(
-        MAX_DISTANCE,
-        Math.max(MIN_DISTANCE, o.distance + e.deltaY * ZOOM_SENSITIVITY),
-      )
+      const o = live.camera
+      o.distance = Math.min(MAX_DISTANCE, Math.max(MIN_DISTANCE, o.distance + e.deltaY * ZOOM_SENSITIVITY))
     }
 
     // Right-dragging otherwise opens the browser context menu mid-orbit.
@@ -95,8 +109,8 @@ export function FollowCamera({ bodyRef }) {
 
     el.addEventListener('pointerdown', onPointerDown)
     el.addEventListener('pointermove', onPointerMove)
-    el.addEventListener('pointerup', endDrag)
-    el.addEventListener('pointercancel', endDrag)
+    el.addEventListener('pointerup', endPointer)
+    el.addEventListener('pointercancel', endPointer)
     el.addEventListener('contextmenu', onContextMenu)
     // passive:false is required for preventDefault() on wheel to take effect.
     el.addEventListener('wheel', onWheel, { passive: false })
@@ -104,40 +118,48 @@ export function FollowCamera({ bodyRef }) {
     return () => {
       el.removeEventListener('pointerdown', onPointerDown)
       el.removeEventListener('pointermove', onPointerMove)
-      el.removeEventListener('pointerup', endDrag)
-      el.removeEventListener('pointercancel', endDrag)
+      el.removeEventListener('pointerup', endPointer)
+      el.removeEventListener('pointercancel', endPointer)
       el.removeEventListener('contextmenu', onContextMenu)
       el.removeEventListener('wheel', onWheel)
     }
-  }, [gl])
+  }, [gl, onTap])
 
-  useFrame((_state, delta) => {
-    const body = bodyRef.current
-    if (!body) return
+  useSystem(ORDER.camera, (delta) => {
+    const b = live.battle
+    const o = live.camera
+    o.mode = b ? 'battle' : 'follow'
 
-    const pos = body.translation()
-    _target.set(pos.x, pos.y, pos.z)
+    if (b) {
+      // Look down at the arena from the player's side, like the original.
+      // From the side of the arena, like the original: the enemy's red pad on the
+      // left of the screen, your blue pad on the right.
+      _target.set(b.cx + 1, 0, b.cz)
+      _desired.set(b.cx - 18, 17, b.cz)
+    } else {
+      const p = live.player
+      _target.set(p.x, p.y + LOOK_HEIGHT, p.z)
+      // Spherical -> cartesian. yaw 0 puts the camera behind the player on +Z.
+      const cp = Math.cos(o.pitch)
+      const dx = Math.sin(o.yaw) * cp
+      const dy = Math.sin(o.pitch)
+      const dz = Math.cos(o.yaw) * cp
+      // Pull in when a wall is between the camera and the player.
+      const distance = cameraClearance(_target.x, _target.y, _target.z, dx, dy, dz, o.distance)
+      _desired.set(_target.x + dx * distance, _target.y + dy * distance, _target.z + dz * distance)
+    }
 
-    // Spherical -> cartesian. yaw 0 puts the camera behind the player on +Z.
-    const { yaw, pitch, distance } = orbit.current
-    const horizontal = Math.cos(pitch) * distance
-    _desired.set(
-      _target.x + Math.sin(yaw) * horizontal,
-      _target.y + Math.sin(pitch) * distance + LOOK_HEIGHT,
-      _target.z + Math.cos(yaw) * horizontal,
-    )
-
-    if (!initialised.current) {
+    if (!initialised.current || lastWarp.current !== live.player.warp) {
+      lastWarp.current = live.player.warp
       // Avoid a long swoop in from wherever the default camera started.
       camera.position.copy(_desired)
-      lookAt.current.copy(_target).setY(_target.y + LOOK_HEIGHT)
+      lookAt.current.copy(_target)
       initialised.current = true
     }
 
     // 1 - pow(x, delta) keeps the easing rate consistent across framerates.
-    camera.position.lerp(_desired, 1 - Math.pow(0.001, delta * (POSITION_SMOOTHING / 10)))
-
-    _target.y += LOOK_HEIGHT
+    const snap = b ? 0.6 : 1
+    camera.position.lerp(_desired, 1 - Math.pow(0.001, delta * (POSITION_SMOOTHING / 10) * snap))
     lookAt.current.lerp(_target, 1 - Math.pow(0.001, delta * (LOOK_SMOOTHING / 10)))
     camera.lookAt(lookAt.current)
   })

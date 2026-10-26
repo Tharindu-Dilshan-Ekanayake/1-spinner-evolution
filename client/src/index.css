@@ -4,6 +4,7 @@
   color-scheme: dark;
   font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
 }
 
 html,
@@ -12,10 +13,462 @@ body,
   height: 100%;
   margin: 0;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 /* The R3F canvas fills its container; the HUD is absolutely positioned over it. */
 canvas {
   display: block;
   touch-action: none;
+}
+
+/*
+ * Custom game styles live in the components layer, so Tailwind utilities such as
+ * `absolute` or `hidden` still override them on the same element.
+ */
+@layer components {
+/* ---------------------------------------------------------------------------
+ * Game typography: chunky font with a thick dark outline, like Roblox sims.
+ * ------------------------------------------------------------------------- */
+
+.game-font {
+  font-family: 'Lilita One', 'Arial Black', system-ui, sans-serif;
+  letter-spacing: 0.01em;
+}
+
+.stroke {
+  color: #fff;
+  -webkit-text-stroke: 0;
+  text-shadow:
+    0 3px 0 #10101c,
+    2px 2px 0 #10101c,
+    -2px 2px 0 #10101c,
+    2px -2px 0 #10101c,
+    -2px -2px 0 #10101c,
+    3px 0 0 #10101c,
+    -3px 0 0 #10101c,
+    0 -3px 0 #10101c;
+}
+
+.stroke-sm {
+  text-shadow:
+    0 2px 0 #10101c,
+    1px 1px 0 #10101c,
+    -1px 1px 0 #10101c,
+    1px -1px 0 #10101c,
+    -1px -1px 0 #10101c;
+}
+
+.rainbow-text {
+  background: linear-gradient(90deg, #ff3d6e, #ffd23a, #3ddc6a, #38a8ff, #b45cff, #ff3d6e);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: rainbow 2.4s linear infinite;
+  text-shadow: none;
+  filter: drop-shadow(0 2px 0 #10101c) drop-shadow(1px 0 0 #10101c) drop-shadow(-1px 0 0 #10101c);
+}
+
+@keyframes rainbow {
+  to {
+    background-position: 200% 0;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Buttons
+ * ------------------------------------------------------------------------- */
+
+.gbtn {
+  position: relative;
+  border: 3px solid rgba(10, 10, 25, 0.75);
+  border-radius: 12px;
+  box-shadow:
+    inset 0 -5px 0 rgba(0, 0, 0, 0.25),
+    inset 0 3px 0 rgba(255, 255, 255, 0.35),
+    0 4px 0 rgba(0, 0, 0, 0.35);
+  transition:
+    transform 0.08s ease,
+    filter 0.12s ease;
+  cursor: pointer;
+  pointer-events: auto;
+  color: #fff;
+}
+
+.gbtn:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px) scale(1.03);
+}
+
+.gbtn:active {
+  transform: translateY(2px) scale(0.97);
+  box-shadow:
+    inset 0 -2px 0 rgba(0, 0, 0, 0.25),
+    inset 0 2px 0 rgba(255, 255, 255, 0.3),
+    0 1px 0 rgba(0, 0, 0, 0.35);
+}
+
+.gbtn:disabled {
+  filter: grayscale(0.85) brightness(0.8);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.g-red { background: linear-gradient(#ff5468, #d6162c); }
+.g-green { background: linear-gradient(#5cf06a, #19b630); }
+.g-blue { background: linear-gradient(#4fc3ff, #1f77e8); }
+.g-yellow { background: linear-gradient(#ffe34d, #ffaa00); }
+.g-orange { background: linear-gradient(#ffb04d, #ff6a00); }
+.g-purple { background: linear-gradient(#c97dff, #8a2be2); }
+.g-pink { background: linear-gradient(#ff7ad9, #e21fa4); }
+.g-gray { background: linear-gradient(#9aa3b8, #5e677d); }
+.g-dark { background: linear-gradient(#3a4064, #1d2140); }
+.g-rainbow {
+  background: linear-gradient(90deg, #ff3d6e, #ffb321, #ffe14d, #3ddc6a, #38a8ff, #b45cff);
+}
+
+/* Studded texture overlay for big HUD tiles. Drawn as an overlay so it doesn't
+ * replace the tile's colour gradient; the element must be positioned. */
+.studs::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.2) 28%, transparent 30%);
+  background-size: 14px 14px;
+  mix-blend-mode: soft-light;
+}
+
+/* ---------------------------------------------------------------------------
+ * Panels
+ * ------------------------------------------------------------------------- */
+
+.panel {
+  pointer-events: auto;
+  background: #161a33;
+  border: 4px solid #0b0d1c;
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  animation: pop-in 0.18s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.panel-head {
+  border-radius: 10px 10px 0 0;
+  border-bottom: 4px solid #0b0d1c;
+}
+
+@keyframes pop-in {
+  from {
+    transform: scale(0.85);
+    opacity: 0;
+  }
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #ffffff55 transparent;
+}
+
+/* ---------------------------------------------------------------------------
+ * World labels (positioned by game/overlay/worldOverlay.js)
+ * ------------------------------------------------------------------------- */
+
+.wl {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  will-change: transform;
+  font-family: 'Lilita One', 'Arial Black', system-ui, sans-serif;
+  white-space: nowrap;
+}
+
+.wl-hp {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.wl-icon {
+  width: 22px;
+  height: 22px;
+  display: none;
+  font-size: 18px;
+  line-height: 22px;
+  text-align: center;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.6));
+}
+
+.wl-skull,
+.wl-crown {
+  display: block;
+}
+
+.wl-skull::before {
+  content: '💀';
+}
+
+.wl-crown::before {
+  content: '👑';
+  font-size: 22px;
+}
+
+.wl-bar {
+  position: relative;
+  width: 64px;
+  height: 13px;
+  border-radius: 7px;
+  background: #1b1b26;
+  border: 2px solid #0a0a12;
+  overflow: hidden;
+}
+
+.wl-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(#7bff7b, #1fcf2f);
+}
+
+.wl-fill.wl-enemy {
+  background: linear-gradient(#ffb44d, #ff6a00);
+}
+
+.wl-fill.wl-enemy-low {
+  background: linear-gradient(#ff6b6b, #d6162c);
+}
+
+.wl-num {
+  position: relative;
+  display: block;
+  text-align: center;
+  font-size: 11px;
+  line-height: 10px;
+  color: #fff;
+  text-shadow:
+    1px 1px 0 #000,
+    -1px 1px 0 #000,
+    1px -1px 0 #000,
+    -1px -1px 0 #000;
+}
+
+.wl-name {
+  text-align: center;
+  color: #fff;
+  font-size: 15px;
+  text-shadow:
+    0 2px 0 rgba(0, 0, 0, 0.7),
+    1px 1px 0 rgba(0, 0, 0, 0.7),
+    -1px 1px 0 rgba(0, 0, 0, 0.7);
+  opacity: 0.92;
+}
+
+.wl-sub {
+  font-size: 11px;
+  color: #ffe14d;
+}
+
+.wl-bubble {
+  background: rgba(255, 255, 255, 0.92);
+  color: #2a2a3a;
+  font-family: system-ui, sans-serif;
+  font-size: 15px;
+  padding: 6px 12px;
+  border-radius: 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.wl-pop {
+  font-size: 30px;
+  color: #fff;
+  text-shadow:
+    0 3px 0 #10101c,
+    2px 2px 0 #10101c,
+    -2px 2px 0 #10101c,
+    2px -2px 0 #10101c,
+    -2px -2px 0 #10101c;
+}
+
+.wl-pop-power::before {
+  content: '💥';
+  margin-right: 2px;
+  font-size: 26px;
+}
+
+.wl-pop-crit {
+  color: #ffe14d;
+  font-size: 36px;
+}
+
+.wl-pop-crit::before {
+  content: '⭐';
+  margin-right: 2px;
+}
+
+.wl-pop-dmg {
+  font-size: 24px;
+  color: #ffffff;
+}
+
+.wl-pop-hurt {
+  font-size: 22px;
+  color: #ff5a5a;
+}
+
+.wl-pop-wins {
+  color: #ffd23a;
+}
+
+.wl-pop-wins::before {
+  content: '🏆';
+}
+
+.wl-pop-candy {
+  color: #ff9a1f;
+}
+
+/* ---------------------------------------------------------------------------
+ * HUD animations
+ * ------------------------------------------------------------------------- */
+
+@keyframes float-up {
+  0% {
+    transform: translate(-50%, 20px) scale(0.6);
+    opacity: 0;
+  }
+  15% {
+    transform: translate(-50%, 0) scale(1.08);
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -40px) scale(1);
+    opacity: 0;
+  }
+}
+
+.anim-reward {
+  animation: float-up 3.1s ease-out forwards;
+}
+
+@keyframes banner {
+  0% {
+    transform: translateX(-120%) skewX(-8deg);
+  }
+  12%,
+  80% {
+    transform: translateX(0) skewX(-8deg);
+  }
+  100% {
+    transform: translateX(120%) skewX(-8deg);
+  }
+}
+
+.anim-banner {
+  animation: banner 2.4s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+
+@keyframes wobble {
+  0%,
+  100% {
+    transform: rotate(0deg) scale(1);
+  }
+  25% {
+    transform: rotate(-10deg) scale(1.05);
+  }
+  75% {
+    transform: rotate(10deg) scale(1.05);
+  }
+}
+
+.anim-wobble {
+  animation: wobble 0.22s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0 rgba(255, 230, 80, 0));
+  }
+  50% {
+    filter: drop-shadow(0 0 12px rgba(255, 230, 80, 0.95));
+  }
+}
+
+.anim-glow {
+  animation: pulse-glow 1.2s ease-in-out infinite;
+}
+
+@keyframes spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.anim-rays {
+  animation: spin-slow 6s linear infinite;
+}
+
+@keyframes reveal {
+  0% {
+    transform: scale(0.2) rotate(-25deg);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.15) rotate(4deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(0);
+  }
+}
+
+.anim-reveal {
+  animation: reveal 0.55s cubic-bezier(0.2, 1.3, 0.4, 1) forwards;
+}
+
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.anim-bob {
+  animation: bob 1.6s ease-in-out infinite;
+}
+
+@keyframes shake-x {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-4px);
+  }
+  75% {
+    transform: translateX(4px);
+  }
+}
+
+.anim-shake {
+  animation: shake-x 0.3s ease-in-out;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.anim-fade {
+  animation: fade-in 0.25s ease-out;
+}
 }

@@ -3,12 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Power Per Click</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#2a8af5" />
+    <title>+1 Spinner Evolution</title>
+
+    <!-- Open the Bloxity connections early and start the avatar body download in
+         parallel with the game's JavaScript. -->
+    <link rel="preconnect" href="https://static.bloxity.io" crossorigin />
+    <link rel="preconnect" href="https://api.bloxity.io" crossorigin />
+    <link rel="preload" href="https://static.bloxity.io/avatars/player.glb" as="fetch" crossorigin="anonymous" />
 
     <!-- Bloxity SDK. Exposes itself as window.Legion.SDK.
-         Must load before the Vite entry script below. -->
-    <script src="https://sdk.bloxity.io/v1/legion-sdk.min.js"></script>
+         async: it must not hold up the game's own scripts. bloxity/sdk.js waits for
+         it to appear, whatever order the two finish loading in. -->
+    <script async src="https://sdk.bloxity.io/v1/legion-sdk.min.js"></script>
   </head>
   <body>
     <div id="root"></div>
