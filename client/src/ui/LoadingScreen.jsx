@@ -52,7 +52,7 @@ export default function LoadingScreen({ sceneReady }) {
       </div>
       {/* Own compositor layer: progress updates below never repaint this big title. */}
       {/* Two lines, so even a narrow phone fits it: "+1 SPINNER" over "EVOLUTION". */}
-      <h1 className="m-0 flex flex-col items-center text-center leading-none" style={{ fontSize: 'clamp(30px, min(13vw, 15vh), 104px)', gap: '0.04em', transform: 'rotate(-3deg)', willChange: 'transform', maxWidth: '100%' }}>
+      <h1 className="m-0 flex flex-col items-center text-center leading-none" style={{ fontSize: 'clamp(28px, min(13vw, 14vh), 104px)', gap: '0.04em', transform: 'rotate(-3deg)', willChange: 'transform', maxWidth: '100%' }}>
         <StrokeText stroke="0.16em" gradient="linear-gradient(180deg, #ffffff 0%, #ffffff 55%, #ffe36b 56%, #ffb21e 100%)">
           +1 SPINNER
         </StrokeText>
@@ -75,7 +75,7 @@ export default function LoadingScreen({ sceneReady }) {
           <StrokeText stroke={5}>{label}</StrokeText>
         </p>
         {status === 'error' && error && <div className="stroke-sm mt-1 text-center text-sm text-red-200">{error}</div>}
-        <p className="mt-1 text-center text-sm sm:text-base md:text-lg">
+        <p className="pp-load-tip mt-1 text-center text-sm sm:text-base md:text-lg">
           <StrokeText stroke={4} className="whitespace-normal">
             {tip}
           </StrokeText>

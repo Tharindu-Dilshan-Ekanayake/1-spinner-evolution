@@ -351,6 +351,13 @@ canvas {
   filter: drop-shadow(0 8px 0 rgba(0, 0, 0, 0.25));
 }
 
+/* On a very short screen (a phone on its side, tiny window) the tip line goes: the rest has to fit. */
+@media (max-height: 340px) {
+  .pp-load-tip {
+    display: none;
+  }
+}
+
 /* The TRAIN and BOOST buttons breathe, so they read as the thing to press. */
 /* Rainbow rays behind the gift and pass stickers (from Muscle to Push Boulder). */
 @keyframes pp-spin {
