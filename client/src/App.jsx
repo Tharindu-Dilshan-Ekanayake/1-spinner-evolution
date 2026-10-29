@@ -86,7 +86,7 @@ function App() {
   }, [])
 
   return (
-    <div className="relative h-screen w-screen select-none overflow-hidden bg-sky-400 game-font">
+    <div className="relative w-screen select-none overflow-hidden bg-sky-400 game-font" style={{ height: '100dvh' }}>
       <GameScene onFirstFrame={onFirstFrame} onAvatarReady={onAvatarReady} onAvatarMounted={onAvatarMounted} onZoneReady={onZoneReady} />
       <WorldOverlay />
       <Hud />
