@@ -9,6 +9,7 @@ import { useGameStore } from '../store/gameStore'
 import { act } from './actions'
 import { SpinnerIcon } from './common'
 import Icon from './kit/Icon'
+import { ChunkyButton } from './kit/parts'
 import StrokeText from './kit/StrokeText'
 import { GRADIENTS, u } from './kit/style'
 
@@ -124,11 +125,32 @@ function SlotPicker({ slot, onClose, tall }) {
   )
 }
 
+const FOLD_KEY = 'spinner_slots_hidden'
+const readHidden = () => {
+  try {
+    return localStorage.getItem(FOLD_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 export default function TeamSlots() {
   const profile = useGameStore((s) => s.profile)
   // Any phone layout (portrait 'tall' or landscape 'short'): finger-sized slots, bottom-sheet picker.
   const tall = useHudMode() !== 'wide'
   const [open, setOpen] = useState(null)
+  // On a phone the slots can be tucked away with a button (it remembers your choice).
+  const [hidden, setHidden] = useState(readHidden)
+  const fold = () => {
+    const next = !hidden
+    setHidden(next)
+    setOpen(null)
+    try {
+      localStorage.setItem(FOLD_KEY, next ? '1' : '0')
+    } catch {
+      /* private mode: it just won't be remembered */
+    }
+  }
   const slots = computeStats(profile).slots
   const byUid = new Map(profile.inventory.map((s) => [s.uid, s]))
   // Still-locked slots, the level ones first: whatever this player hasn't reached yet.
@@ -136,7 +158,28 @@ export default function TeamSlots() {
   const toggle = (i) => setOpen((o) => (o === i ? null : i))
   const box = (border, bg) => slotStyle(border, bg, tall)
 
+  const folded = tall && hidden
   return (
+    <div className="flex flex-col items-center" style={{ gap: 4, maxWidth: '100%' }}>
+      {tall && (
+        // The game's chunky button (glossy gradient, black outline), in fixed phone sizes
+        // (the HUD unit would shrink it to nothing here): blue to hide, gold to show again.
+        <ChunkyButton
+          gradient={folded ? GRADIENTS.goldButton : GRADIENTS.skyButton}
+          onClick={fold}
+          title={folded ? 'Show your team slots' : 'Hide your team slots'}
+          style={{ height: 34, padding: '0 16px 0 12px', gap: 7, border: '3px solid #111', borderRadius: 17, boxShadow: '0 3px 0 rgba(0,0,0,0.5)' }}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" style={{ position: 'relative', transform: folded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
+            <path d="M3 5.5 8 10.5 13 5.5" fill="none" stroke="#111" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M3 5.5 8 10.5 13 5.5" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="relative" style={{ fontSize: 15, lineHeight: 1 }}>
+            <StrokeText stroke={4}>{folded ? `Team (${slots})` : 'Hide team'}</StrokeText>
+          </span>
+        </ChunkyButton>
+      )}
+      {!folded && (
     // On a phone the slots wrap onto a second row (11 of them don't fit one at a finger-sized width).
     <div className={`pointer-events-auto relative flex items-center justify-center ${tall ? 'flex-wrap' : 'flex-nowrap'}`} style={{ gap: tall ? 4 : u(6), maxWidth: '100%' }}>
       {open !== null && open < slots && <SlotPicker slot={open} onClose={() => setOpen(null)} tall={tall} />}
@@ -183,6 +226,8 @@ export default function TeamSlots() {
           )}
         </button>
       ))}
+    </div>
+      )}
     </div>
   )
 }
