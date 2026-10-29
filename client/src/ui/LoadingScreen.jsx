@@ -42,19 +42,25 @@ export default function LoadingScreen({ sceneReady }) {
 
   return (
     <div
-      className={`pp-font absolute inset-0 z-50 flex flex-col items-center justify-center gap-6 transition-opacity duration-500 ${done ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
-      style={{ background: 'linear-gradient(180deg, #2f8ff2 0%, #6fc0fb 55%, #c6ec86 55.2%, #a9dd6a 100%)' }}
+      className={`pp-font absolute inset-0 z-50 flex flex-col items-center justify-center overflow-hidden px-4 transition-opacity duration-500 ${done ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
+      // Everything is sized by the smaller of the screen's width and height (vmin), so it
+      // fits a phone upright, a phone on its side and a desktop window alike.
+      style={{ gap: 'clamp(8px, 3vmin, 24px)', background: 'linear-gradient(180deg, #2f8ff2 0%, #6fc0fb 55%, #c6ec86 55.2%, #a9dd6a 100%)' }}
     >
       <div className="pp-loading-disc" aria-hidden="true">
-        <img src={iconUrl('spinner')} alt="" width="150" height="150" draggable={false} />
+        <img src={iconUrl('spinner')} alt="" draggable={false} style={{ width: 'clamp(64px, 20vmin, 150px)', height: 'clamp(64px, 20vmin, 150px)' }} />
       </div>
       {/* Own compositor layer: progress updates below never repaint this big title. */}
-      <h1 className="m-0 text-center leading-none" style={{ fontSize: 'clamp(40px, 9vw, 96px)', transform: 'rotate(-3deg)', willChange: 'transform' }}>
+      {/* Two lines, so even a narrow phone fits it: "+1 SPINNER" over "EVOLUTION". */}
+      <h1 className="m-0 flex flex-col items-center text-center leading-none" style={{ fontSize: 'clamp(30px, min(13vw, 15vh), 104px)', gap: '0.04em', transform: 'rotate(-3deg)', willChange: 'transform', maxWidth: '100%' }}>
         <StrokeText stroke="0.16em" gradient="linear-gradient(180deg, #ffffff 0%, #ffffff 55%, #ffe36b 56%, #ffb21e 100%)">
-          +1 SPINNER EVOLUTION
+          +1 SPINNER
+        </StrokeText>
+        <StrokeText stroke="0.16em" gradient="linear-gradient(180deg, #ffffff 0%, #ffffff 55%, #ffe36b 56%, #ffb21e 100%)">
+          EVOLUTION
         </StrokeText>
       </h1>
-      <div className="w-[min(560px,80vw)]">
+      <div className="w-[min(560px,88vw)]">
         <div className="relative h-9 overflow-hidden rounded-xl border-4 border-black bg-black/40">
           {/* scaleX, not width: the fill animates on the compositor, with no layout per frame. */}
           <div
@@ -65,18 +71,18 @@ export default function LoadingScreen({ sceneReady }) {
             <StrokeText stroke={5}>{done ? 'READY!' : `LOADING ${shown}%`}</StrokeText>
           </div>
         </div>
-        <p className="mt-3 text-center text-lg">
+        <p className="mt-2 text-center text-base sm:text-lg">
           <StrokeText stroke={5}>{label}</StrokeText>
         </p>
         {status === 'error' && error && <div className="stroke-sm mt-1 text-center text-sm text-red-200">{error}</div>}
-        <p className="mt-2 text-center text-base md:text-lg">
+        <p className="mt-1 text-center text-sm sm:text-base md:text-lg">
           <StrokeText stroke={4} className="whitespace-normal">
             {tip}
           </StrokeText>
         </p>
       </div>
       {/* Rasterise the emoji used in battle now, so the first hit doesn't stutter. */}
-      <div aria-hidden className="pointer-events-none absolute left-0 top-0 opacity-0">💀👑💥⭐🏆🍬✨🎁🔒</div>
+      <div aria-hidden className="pointer-events-none absolute left-0 top-0 opacity-0">💀👑💥⭐🏆✨🎁🔒</div>
     </div>
   )
 }
