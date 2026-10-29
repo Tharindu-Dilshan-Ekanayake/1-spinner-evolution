@@ -1,0 +1,8 @@
+{
+  "name": "spinner-shared",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Game data, formulas and map layout shared by the client and the Colyseus server.",
+  "type": "module",
+  "main": "index.js"
+}

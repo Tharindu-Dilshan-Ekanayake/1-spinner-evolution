@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 
 import { configureAvatarTexture } from '../game/avatarRig'
+import { baseBodyUrl } from './avatarAssets'
 
 /**
  * Imperative loaders for the equipped-cosmetic assets.
@@ -10,8 +11,9 @@ import { configureAvatarTexture } from '../game/avatarRig'
  * Why not drei's `useGLTF` / `useLoader` for these: the set of equipped slots is
  * dynamic (0-8 parts, changing at runtime via `onAvatarChanged`), and React hooks
  * cannot be called conditionally or in a variable-length loop. The base `player.glb`
- * is a fixed URL and *is* loaded with `useGLTF` in PlayerAvatar; everything dynamic
- * goes through here.
+ * comes from here too (loadBaseBody), read with React's `use()`: drei's `useGLTF`
+ * would bundle a second GLTFLoader plus Draco and Meshopt decoders this game never
+ * uses.
  *
  * Every loader resolves to `null` instead of throwing on failure - a 404 on an
  * unequipped or delisted asset must degrade to the base mesh, never break the scene.
@@ -35,6 +37,19 @@ function cached(url, produce) {
     )
   }
   return cache.get(url)
+}
+
+let baseBody = null
+
+/**
+ * The base `player.glb` every avatar and champion is cloned from: loaded once and
+ * shared. Unlike the cosmetic parts it is required, so a failure rejects (and reaches
+ * the error boundary) instead of resolving to null.
+ * @returns {Promise<{ scene: import('three').Object3D }>}
+ */
+export function loadBaseBody() {
+  if (!baseBody) baseBody = gltfLoader.loadAsync(baseBodyUrl())
+  return baseBody
 }
 
 /**

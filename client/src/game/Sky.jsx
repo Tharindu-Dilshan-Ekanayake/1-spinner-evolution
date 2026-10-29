@@ -1,20 +1,21 @@
 import { useFrame, useThree } from '@react-three/fiber'
-import { useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import {
   BackSide,
   BufferAttribute,
+  BufferGeometry,
   Color,
   IcosahedronGeometry,
+  Object3D,
   Triangle,
   Vector3,
 } from 'three'
 
-import { CLOUDS, LIGHTS, SKY } from './sceneStyle'
+import { useQuality } from '../store/qualityStore'
+import { CLOUDS, LIGHTS } from './sceneStyle'
 
 const SKY_RADIUS = 450
 
-/** Centre of the cloud field: the middle of the track. */
-const CLOUD_CENTER = [0, 0, -80]
 /** Radians per second the whole cloud field turns about its centre. */
 const CLOUD_DRIFT = 0.004
 
@@ -47,17 +48,18 @@ const skyFragmentShader = /* glsl */ `
  * Vertical gradient dome. Follows the camera so the horizon always sits at eye level
  * and the dome can never be walked out of.
  */
-function SkyDome() {
+function SkyDome({ sky }) {
   const ref = useRef(null)
   const camera = useThree((s) => s.camera)
 
+  // A new zone's sky gets a new material (keyed below); the program itself is cached.
   const uniforms = useMemo(
     () => ({
-      topColor: { value: new Color(SKY.top) },
-      horizonColor: { value: new Color(SKY.horizon) },
-      exponent: { value: SKY.exponent },
+      topColor: { value: new Color(sky.top) },
+      horizonColor: { value: new Color(sky.horizon) },
+      exponent: { value: sky.exponent },
     }),
-    [],
+    [sky],
   )
 
   useFrame(() => {
@@ -66,10 +68,12 @@ function SkyDome() {
 
   return (
     <mesh ref={ref} renderOrder={-1} frustumCulled={false}>
-      <sphereGeometry args={[SKY_RADIUS, 32, 16]} />
+      <sphereGeometry args={[SKY_RADIUS, 24, 12]} />
       <shaderMaterial
+        key={sky.top + sky.horizon}
         side={BackSide}
         depthWrite={false}
+        fog={false}
         uniforms={uniforms}
         vertexShader={skyVertexShader}
         fragmentShader={skyFragmentShader}
@@ -135,78 +139,111 @@ function createPuffGeometry() {
 }
 
 /**
- * Each cloud is a row of overlapping, slightly flattened puffs with one more on top.
- *
- * Kept fairly low and large: the follow camera looks slightly down, so only clouds
- * low in the sky ever reach the top of the screen. The lowest cloud bottom still sits
- * above the highest the camera can orbit.
+ * Every puff of every cloud as one instanced mesh (one draw call). Clouds ring the
+ * play area, some below the island edge so the world reads as floating in the sky.
  */
-function buildCloudLayout(count) {
+function buildPuffs(count) {
   const rand = mulberry32(7)
-  const clouds = []
-
+  const puffs = []
   for (let i = 0; i < count; i += 1) {
     const size = 7 + rand() * 6
     const puffCount = 3 + Math.floor(rand() * 3)
-    const puffs = []
-
+    const angle = rand() * Math.PI * 2
+    const dist = 130 + rand() * 120
+    const cx = Math.cos(angle) * dist
+    const cz = Math.sin(angle) * dist - 60
+    const cy = rand() < 0.4 ? -18 - rand() * 14 : 30 + rand() * 18
+    const rot = rand() * Math.PI
     for (let p = 0; p < puffCount; p += 1) {
-      // Bigger in the middle, tapering to the ends.
       const along = (p - (puffCount - 1) / 2) * size * 0.9
       const taper = 1 - Math.abs(along) / (size * puffCount * 0.6)
       const s = size * (0.75 + rand() * 0.35) * taper
       puffs.push({
-        position: [along, (rand() - 0.3) * size * 0.4, (rand() - 0.5) * size * 0.6],
-        scale: [s, s * 0.75, s * 0.85],
+        x: cx + Math.cos(rot) * along,
+        y: cy + (rand() - 0.3) * size * 0.4,
+        z: cz + Math.sin(rot) * along,
+        sx: s,
+        sy: s * 0.75,
+        sz: s * 0.85,
       })
     }
-    // The billow on top that makes it read as a cumulus rather than a sausage.
-    puffs.push({
-      position: [(rand() - 0.5) * size, size * 0.55, 0],
-      scale: [size * 0.8, size * 0.65, size * 0.7],
-    })
-
-    clouds.push({
-      position: [(rand() * 2 - 1) * 220, 36 + rand() * 16, (rand() * 2 - 1) * 260],
-      rotationY: rand() * Math.PI,
-      puffs,
-    })
+    puffs.push({ x: cx, y: cy + size * 0.55, z: cz, sx: size * 0.8, sy: size * 0.65, sz: size * 0.7 })
   }
-
-  return clouds
+  return puffs
 }
 
-function Clouds() {
+function Clouds({ count }) {
   const ref = useRef(null)
   const geometry = useMemo(() => createPuffGeometry(), [])
-  const layout = useMemo(() => buildCloudLayout(CLOUDS.count), [])
+  const puffs = useMemo(() => buildPuffs(count), [count])
+
+  useLayoutEffect(() => {
+    const mesh = ref.current
+    if (!mesh) return
+    const dummy = new Object3D()
+    puffs.forEach((p, i) => {
+      dummy.position.set(p.x, p.y, p.z)
+      dummy.scale.set(p.sx, p.sy, p.sz)
+      dummy.updateMatrix()
+      mesh.setMatrixAt(i, dummy.matrix)
+    })
+    mesh.instanceMatrix.needsUpdate = true
+    mesh.computeBoundingSphere()
+  }, [puffs])
+
+  useEffect(() => () => geometry.dispose(), [geometry])
 
   useFrame((_state, delta) => {
     if (ref.current) ref.current.rotation.y += delta * CLOUD_DRIFT
   })
 
+  if (!puffs.length) return null
   return (
-    <group ref={ref} position={CLOUD_CENTER}>
-      {layout.map((cloud, i) => (
-        <group key={i} position={cloud.position} rotation={[0, cloud.rotationY, 0]}>
-          {cloud.puffs.map((puff, p) => (
-            <mesh key={p} geometry={geometry} position={puff.position} scale={puff.scale}>
-              {/* fog off: the clouds sit past the fog's far distance and would vanish. */}
-              <meshBasicMaterial vertexColors fog={false} />
-            </mesh>
-          ))}
-        </group>
-      ))}
-    </group>
+    <instancedMesh ref={ref} args={[geometry, undefined, puffs.length]} frustumCulled={false}>
+      {/* fog off: the clouds sit past the fog's far distance and would vanish. */}
+      <meshBasicMaterial vertexColors fog={false} />
+    </instancedMesh>
   )
 }
 
-/** Gradient sky plus drifting low-poly clouds. */
-export function Sky() {
+/** Night-sky stars as one point cloud on the dome. */
+function Stars() {
+  const ref = useRef(null)
+  const camera = useThree((s) => s.camera)
+  const geometry = useMemo(() => {
+    const rand = mulberry32(11)
+    const n = 600
+    const pos = new Float32Array(n * 3)
+    for (let i = 0; i < n; i += 1) {
+      const u = rand() * 2 - 1
+      const t = rand() * Math.PI * 2
+      const y = Math.abs(u) * 0.95 + 0.05
+      const r = Math.sqrt(1 - y * y)
+      pos[i * 3] = Math.cos(t) * r * 400
+      pos[i * 3 + 1] = y * 400
+      pos[i * 3 + 2] = Math.sin(t) * r * 400
+    }
+    const g = new BufferGeometry()
+    g.setAttribute('position', new BufferAttribute(pos, 3))
+    return g
+  }, [])
+  useEffect(() => () => geometry.dispose(), [geometry])
+  useFrame(() => ref.current?.position.copy(camera.position))
+  return (
+    <points ref={ref} geometry={geometry} frustumCulled={false} renderOrder={-1}>
+      <pointsMaterial color="#ffffff" size={1.6} sizeAttenuation={false} fog={false} depthWrite={false} />
+    </points>
+  )
+}
+
+/** Gradient sky plus whatever the zone's theme adds (clouds, stars). */
+export function Sky({ theme }) {
+  const q = useQuality()
   return (
     <>
-      <SkyDome />
-      <Clouds />
+      <SkyDome sky={theme.sky} />
+      {theme.clouds && q.clouds > 0 && <Clouds count={q.clouds} />}
+      {theme.stars && <Stars />}
     </>
   )
 }

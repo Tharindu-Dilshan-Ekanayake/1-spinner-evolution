@@ -26,3 +26,6 @@ dist-ssr
 # local env (keep .env.example tracked)
 .env
 .env.local
+
+# perf probe output
+perf-out

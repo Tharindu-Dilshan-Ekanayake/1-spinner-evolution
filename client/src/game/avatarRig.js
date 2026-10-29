@@ -105,6 +105,8 @@ export function collectRig(root) {
       entry.axisX = new Vector3(1, 0, 0).applyQuaternion(relInv).normalize()
       /** Local axis to rotate about for lateral sway. */
       entry.axisZ = new Vector3(0, 0, 1).applyQuaternion(relInv).normalize()
+      /** Local axis to rotate about for a twist round the body. */
+      entry.axisY = new Vector3(0, 1, 0).applyQuaternion(relInv).normalize()
     }
 
     rig.hatBone = skeleton.bones.find((b) => b.name === HAT_BONE) || null
@@ -216,16 +218,17 @@ export function applyPart(rig, slot, partScene) {
 }
 
 /**
- * Attaches a hat or back accessory to its bone.
- * Offsets are the SDK's own: hats sit at y=0.8 on `Neck1`, back items at the origin
- * of `Spine2`.
+ * Attaches a head (hat, hair, mask) or back accessory to its bone.
+ * Offsets are the SDK's own: head items sit at y=0.8 on `Neck1`, back items at the
+ * origin of `Spine2`.
  */
 export function attachAccessory(rig, kind, object) {
-  const bone = kind === 'hat' ? rig.hatBone : rig.backBone
+  const head = kind !== 'back'
+  const bone = head ? rig.hatBone : rig.backBone
   if (!object || !bone) return null
 
   object.scale.setScalar(1)
-  object.position.set(0, kind === 'hat' ? 0.8 : 0, 0)
+  object.position.set(0, head ? 0.8 : 0, 0)
   object.traverse((child) => {
     if (child.isMesh) child.castShadow = true
   })
@@ -315,7 +318,7 @@ const _animQ = new Quaternion()
 
 /**
  * Rotates a bone about one of its precomputed character-space axes.
- * `which` is 'axisX' (forward/back swing) or 'axisZ' (lateral sway).
+ * `which` is 'axisX' (forward/back swing), 'axisZ' (lateral sway) or 'axisY' (twist).
  */
 function rotateBone(rig, name, which, angle) {
   if (!angle) return
@@ -329,65 +332,293 @@ function rotateBone(rig, name, which, angle) {
 const swing = (rig, name, angle) => rotateBone(rig, name, 'axisX', angle)
 /** Sway a limb out to the side. */
 const sway = (rig, name, angle) => rotateBone(rig, name, 'axisZ', angle)
+/** Twist a bone round the character's vertical axis. */
+const twist = (rig, name, angle) => rotateBone(rig, name, 'axisY', angle)
+
+const smoothstep = (a, b, x) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)))
+  return t * t * (3 - 2 * t)
+}
+
+/**
+ * Feeds turning into the walk cycle: turning on the spot (or sharply while walking
+ * slowly) steps the feet like a short walk, instead of the body sliding round. Call
+ * once per frame with the character's facing; returns the speed to animate with.
+ *
+ * @param {{ prevRy?: number, turn?: number }} motion keeps its own state on this object
+ */
+export function turnAwareSpeed(motion, ry, speed, maxSpeed, dt) {
+  let d = ry - (motion.prevRy ?? ry)
+  while (d > Math.PI) d -= Math.PI * 2
+  while (d < -Math.PI) d += Math.PI * 2
+  motion.prevRy = ry
+  const rate = dt > 0 ? Math.abs(d) / dt : 0
+  motion.turn = (motion.turn || 0) + (rate - (motion.turn || 0)) * Math.min(1, dt * 12)
+  return motion.turn > 0.5 ? Math.max(speed, Math.min(maxSpeed * 0.45, motion.turn * 2.2)) : speed
+}
+
+/**
+ * This game's body shape, multiplied onto each player's own Bloxity proportions:
+ * broader shoulders, a slightly bigger head and a wider, sturdier stance - a spinner
+ * champion's build, while everyone still looks like their own avatar.
+ */
+export const GAME_BODY = { shoulderWidth: 1.12, torsoScaleX: 1.06, headScale: 1.1, armLength: 0.97, legOffsetX: 1.14 }
+
+/** `proportions` with GAME_BODY applied (a new object; inputs are not touched). */
+export function gameProportions(proportions = {}) {
+  const out = { ...proportions }
+  for (const [key, k] of Object.entries(GAME_BODY)) out[key] = (proportions[key] ?? 1) * k
+  return out
+}
+
+/** 1 between `a` and `b`, easing in and out over `ramp` seconds at each end. */
+const envelope = (x, a, b, ramp) => smoothstep(a, a + ramp, x) * (1 - smoothstep(b - ramp, b, x))
+
+/** How long a victory or defeat emote plays, in seconds (moving away ends it early). */
+export const EMOTE_SECONDS = 3.6
+
+/**
+ * Victory: hop up and down with both fists pumping above the head.
+ * Defeat: drop to the knees, slump forward and pound the ground with both fists.
+ * `t` is seconds since the emote began.
+ */
+function poseEmote(rig, emote, t) {
+  const w = smoothstep(0, 0.25, t)
+  let lift
+
+  if (emote === 'cheer') {
+    const hop = (t % 0.62) / 0.62
+    const height = 4 * hop * (1 - hop)
+    // Squat a little at each take-off and landing; tuck the legs at the top.
+    const squat = Math.max(0, 1 - Math.min(hop, 1 - hop) / 0.14)
+    lift = (height * 1.5 - squat * 0.3) * w
+    swing(rig, 'LegL1', (-0.5 * height - 0.35 * squat) * w)
+    swing(rig, 'LegR1', (-0.5 * height - 0.35 * squat) * w)
+    swing(rig, 'LegL2', (0.85 * height + 0.6 * squat) * w)
+    swing(rig, 'LegR2', (0.85 * height + 0.6 * squat) * w)
+    // Arms straight up in a V, fists pumping in turn. (The tilt is applied before the
+    // swing, and a swing past vertical mirrors it: inward here ends up as a V overhead.)
+    const pump = Math.sin(t * 13)
+    swing(rig, 'ArmL1', (-2.75 - pump * 0.22) * w)
+    swing(rig, 'ArmR1', (-2.75 + pump * 0.22) * w)
+    sway(rig, 'ArmL1', 0.42 * w)
+    sway(rig, 'ArmR1', -0.42 * w)
+    swing(rig, 'Spine1', 0.12 * w)
+    swing(rig, 'Neck1', 0.28 * w)
+  } else {
+    // Down on both knees: shins fold back flat, so the body drops one shin's length.
+    const kneel = smoothstep(0, 0.45, t)
+    lift = -1.2 * kneel
+    swing(rig, 'LegL2', 1.55 * kneel)
+    swing(rig, 'LegR2', 1.55 * kneel)
+    swing(rig, 'Spine1', -0.55 * kneel)
+    swing(rig, 'Neck1', -0.35 * kneel)
+    // Then the fists: each rises slowly and slams down, the two taking turns.
+    const pounding = smoothstep(0.35, 0.6, t)
+    const fist = (u) => {
+      const k = u % 1
+      if (k < 0.55) return smoothstep(0, 0.55, k)
+      if (k < 0.68) return 1 - smoothstep(0.55, 0.68, k)
+      return 0
+    }
+    const beat = t * 2.6
+    const left = fist(beat)
+    const right = fist(beat + 0.5)
+    swing(rig, 'ArmL1', (-0.5 - 1.25 * left * pounding) * kneel)
+    swing(rig, 'ArmR1', (-0.5 - 1.25 * right * pounding) * kneel)
+    sway(rig, 'ArmL1', -0.12 * kneel)
+    sway(rig, 'ArmR1', 0.12 * kneel)
+    // A small jolt through the body on every slam.
+    const slam = Math.max(0, 1 - Math.abs((beat % 0.5) - 0.34) / 0.05)
+    lift -= 0.07 * slam * pounding
+  }
+  rig.root.position.y = rig.rootRestY + lift
+}
 
 /**
  * Poses the rig for the current motion state.
  *
+ * Everything eases rather than switching: the walk cycle's weight follows the speed
+ * over about a tenth of a second, and its phase is integrated (frequency x time-step),
+ * so starting, stopping and changing speed never jump the legs to a new position.
+ *
  * @param {object} rig from `collectRig`
- * @param {{ time: number, speed: number, grounded: boolean, maxSpeed: number }} motion
+ * @param {{ time: number, speed: number, grounded: boolean, maxSpeed: number,
+ *           emote?: 'cheer'|'defeat'|null, emoteStart?: number }} motion
  *   `speed` is horizontal speed in world units/sec; `maxSpeed` is what counts as a
  *   full-amplitude run, so the cycle scales smoothly from a walk to a sprint.
  */
 export function animateRig(rig, motion) {
   if (!rig?.skeleton || !motion) return
 
-  const { time = 0, speed = 0, grounded = true, maxSpeed = 6 } = motion
-  const ratio = Math.min(speed / Math.max(maxSpeed, 0.001), 1)
-
+  const { time = 0, speed = 0, grounded = true, maxSpeed = 6, emote = null, emoteStart = 0 } = motion
+  const st = rig.anim || (rig.anim = { last: time, phase: 0, gait: 0, air: 0, land: -10, idleT: 0 })
+  const dt = Math.min(0.1, Math.max(0, time - st.last))
+  st.last = time
   rig.root.position.y = rig.rootRestY
 
+  if (emote) {
+    poseEmote(rig, emote, time - emoteStart)
+    return
+  }
+
+  // --- Eased state ----------------------------------------------------------
+  const target = Math.min(speed / Math.max(maxSpeed, 0.001), 1)
+  st.gait += (target - st.gait) * Math.min(1, dt * 9)
+  if (st.air > 0.6 && grounded) st.land = time
+  st.air += ((grounded ? 0 : 1) - st.air) * Math.min(1, dt * (grounded ? 16 : 10))
+  st.phase += dt * (5.5 + st.gait * 5)
+  st.idleT = st.gait < 0.05 && st.air < 0.1 ? st.idleT + dt : 0
+
+  const g = st.gait
+  const ground = 1 - st.air
+  const walk = smoothstep(0.03, 0.2, g) * ground
+  const idle = (1 - smoothstep(0.03, 0.2, g)) * ground
+  // A real stride even when walking slowly, growing to full length at a sprint.
+  const stride = 0.45 + 0.55 * g
+  const cycle = Math.sin(st.phase)
+  const step = Math.cos(st.phase)
+  let lift = 0
+
+  // --- Standing: a ready stance, breathing, then little fidgets ---------------
+  if (idle > 0.001) {
+    const breathe = Math.sin(time * 1.7)
+    const shift = Math.sin(time * 0.8)
+    // Feet apart, chest up, arms a little out and forward.
+    sway(rig, 'LegL1', -0.06 * idle)
+    sway(rig, 'LegR1', 0.06 * idle)
+    swing(rig, 'Spine1', (0.04 + breathe * 0.015) * idle)
+    sway(rig, 'Spine1', shift * 0.035 * idle)
+    sway(rig, 'ArmL1', (-0.14 - breathe * 0.03) * idle)
+    sway(rig, 'ArmR1', (0.14 + breathe * 0.03) * idle)
+    swing(rig, 'ArmL1', -0.07 * idle)
+    swing(rig, 'ArmR1', -0.07 * idle)
+    lift += breathe * 0.025 * idle
+
+    // Standing still a while: look around, then rip a launcher cord like a real
+    // spinner battler - left hand holds the launcher out, right hand yanks back.
+    const it = st.idleT % 12
+    const look = envelope(it, 4, 6.6, 0.5)
+    if (look > 0) twist(rig, 'Neck1', Math.sin(((it - 4) / 2.6) * Math.PI * 2) * 0.55 * look * idle)
+    const rip = envelope(it, 9, 10.6, 0.25)
+    if (rip > 0) {
+      const pull = smoothstep(0.42, 0.56, (it - 9) / 1.6)
+      swing(rig, 'ArmL1', -1.25 * rip * idle)
+      swing(rig, 'ArmR1', (-1.3 + 1.9 * pull) * rip * idle)
+      swing(rig, 'ArmR2', -0.8 * (1 - pull) * rip * idle)
+      twist(rig, 'Spine2', (-0.25 + 0.5 * pull) * rip * idle)
+    }
+  }
+
+  // --- Walk / run -----------------------------------------------------------
+  if (walk > 0.001) {
+    const legAmp = 0.8 * stride * walk
+    const armAmp = 0.65 * stride * walk
+    // Legs swing in opposition; knees fold on the backswing.
+    swing(rig, 'LegL1', cycle * legAmp)
+    swing(rig, 'LegR1', -cycle * legAmp)
+    swing(rig, 'LegL2', Math.max(0, -cycle) * 1.15 * stride * walk)
+    swing(rig, 'LegR2', Math.max(0, cycle) * 1.15 * stride * walk)
+    // Arms counter-swing, a little out from the body, elbows bending more at speed.
+    swing(rig, 'ArmL1', -cycle * armAmp)
+    swing(rig, 'ArmR1', cycle * armAmp)
+    sway(rig, 'ArmL1', -0.07 * walk)
+    sway(rig, 'ArmR1', 0.07 * walk)
+    swing(rig, 'ArmL2', (Math.max(0, cycle) * 0.45 + 0.25 * g) * stride * walk)
+    swing(rig, 'ArmR2', (Math.max(0, -cycle) * 0.45 + 0.25 * g) * stride * walk)
+    // Shoulders twist against the hips, the body rolls over each foot, leans into
+    // the run, and the head stays steady.
+    twist(rig, 'Spine2', -cycle * 0.14 * stride * walk)
+    sway(rig, 'Spine1', step * 0.035 * walk)
+    swing(rig, 'Spine1', -0.16 * g * walk)
+    swing(rig, 'Neck1', 0.1 * g * walk)
+    // Highest as each leg passes under the body: twice per cycle.
+    lift += (0.5 + 0.5 * Math.cos(st.phase * 2)) * 0.2 * stride * walk
+  }
+
   // --- Airborne: tuck the legs, throw the arms up ---------------------------
-  if (!grounded) {
-    swing(rig, 'LegL1', -0.55)
-    swing(rig, 'LegL2', 0.75)
-    swing(rig, 'LegR1', 0.3)
-    swing(rig, 'LegR2', 0.2)
-    swing(rig, 'ArmL1', -2.1)
-    swing(rig, 'ArmR1', -2.1)
-    swing(rig, 'Spine1', -0.1)
+  if (st.air > 0.001) {
+    const a = st.air
+    swing(rig, 'LegL1', -0.55 * a)
+    swing(rig, 'LegL2', 0.75 * a)
+    swing(rig, 'LegR1', 0.3 * a)
+    swing(rig, 'LegR2', 0.2 * a)
+    swing(rig, 'ArmL1', -2.1 * a)
+    swing(rig, 'ArmR1', -2.1 * a)
+    swing(rig, 'Spine1', -0.1 * a)
+  }
+
+  // --- Landing: a quick squash through the knees ----------------------------
+  const sinceLand = time - st.land
+  if (sinceLand < 0.24) {
+    const k = Math.sin((sinceLand / 0.24) * Math.PI)
+    swing(rig, 'LegL1', -0.35 * k)
+    swing(rig, 'LegR1', -0.35 * k)
+    swing(rig, 'LegL2', 0.6 * k)
+    swing(rig, 'LegR2', 0.6 * k)
+    swing(rig, 'Spine1', -0.12 * k)
+    lift -= 0.28 * k
+  }
+
+  rig.root.position.y = rig.rootRestY + lift
+}
+
+/** Moods for poseChampion. */
+export const MOOD = { idle: 0, cheer: 1, beaten: 2, victory: 3 }
+
+/**
+ * Poses a stage champion standing on their red pad. Like animateRig, it multiplies onto
+ * the rest pose, so applyProportions must run first in the same frame.
+ *
+ *  idle    - hands on hips, a fist pump every few seconds
+ *  cheer   - both fists pumping while their spinners fight
+ *  beaten  - slumped forward, head down, arms hanging
+ *  victory - arms high, bouncing
+ */
+export function poseChampion(rig, time, mood) {
+  if (!rig?.skeleton) return
+  rig.root.position.y = rig.rootRestY
+
+  if (mood === MOOD.cheer || mood === MOOD.victory) {
+    const fast = mood === MOOD.victory ? 9 : 7
+    const a = Math.sin(time * fast)
+    swing(rig, 'ArmL1', -2.6 - a * 0.3)
+    swing(rig, 'ArmR1', -2.6 + a * 0.3)
+    // Mirrored by the swing past vertical: this opens the arms into a V overhead.
+    sway(rig, 'ArmL1', 0.35)
+    sway(rig, 'ArmR1', -0.35)
+    swing(rig, 'Spine1', 0.08)
+    rig.root.position.y = rig.rootRestY + Math.abs(Math.sin(time * fast)) * (mood === MOOD.victory ? 0.6 : 0.25)
     return
   }
 
-  // --- Standing still: a slow breathing sway --------------------------------
-  if (ratio < 0.04) {
-    const idle = Math.sin(time * 1.6)
-    sway(rig, 'ArmL1', -0.07 - idle * 0.03)
-    sway(rig, 'ArmR1', 0.07 + idle * 0.03)
-    swing(rig, 'Spine1', idle * 0.02)
-    rig.root.position.y = rig.rootRestY + idle * 0.03
+  if (mood === MOOD.beaten) {
+    swing(rig, 'Spine1', -0.35)
+    swing(rig, 'Neck1', -0.45)
+    sway(rig, 'ArmL1', -0.04)
+    sway(rig, 'ArmR1', 0.04)
+    swing(rig, 'ArmL1', 0.25)
+    swing(rig, 'ArmR1', 0.25)
     return
   }
 
-  // --- Walk / run cycle -----------------------------------------------------
-  // Step frequency rises with speed so a sprint doesn't look like a moonwalk.
-  const phase = time * (5 + ratio * 5)
-  const cycle = Math.sin(phase)
-  const legAmp = 0.85 * ratio
-  const armAmp = 0.7 * ratio
-
-  // Legs swing in opposition; knees fold on the backswing only.
-  swing(rig, 'LegL1', cycle * legAmp)
-  swing(rig, 'LegR1', -cycle * legAmp)
-  swing(rig, 'LegL2', Math.max(0, -cycle) * 1.1 * ratio)
-  swing(rig, 'LegR2', Math.max(0, cycle) * 1.1 * ratio)
-
-  // Arms counter-swing against the legs.
-  swing(rig, 'ArmL1', -cycle * armAmp)
-  swing(rig, 'ArmR1', cycle * armAmp)
-  swing(rig, 'ArmL2', Math.max(0, cycle) * 0.5 * ratio)
-  swing(rig, 'ArmR2', Math.max(0, -cycle) * 0.5 * ratio)
-
-  // Lean into the run, and bob once per step (twice per full cycle).
-  swing(rig, 'Spine1', -0.14 * ratio)
-  rig.root.position.y = rig.rootRestY + Math.abs(Math.cos(phase)) * 0.18 * ratio
+  // Idle: hands on hips; every 4s the right fist goes up and pumps twice.
+  const breathe = Math.sin(time * 1.8)
+  sway(rig, 'ArmL1', -0.55 - breathe * 0.03)
+  sway(rig, 'ArmL2', 1.25)
+  swing(rig, 'Spine1', 0.06 + breathe * 0.015)
+  swing(rig, 'Neck1', 0.08)
+  const t = time % 4
+  if (t > 2.6) {
+    const up = Math.min(1, (t - 2.6) * 6) * Math.min(1, (4 - t) * 6)
+    const pump = Math.sin((t - 2.6) * 14) * 0.25
+    swing(rig, 'ArmR1', (-2.6 + pump) * up)
+    swing(rig, 'ArmR2', -0.7 * up)
+    sway(rig, 'ArmR1', 0.55 * (1 - up) + 0.15 * up)
+    sway(rig, 'ArmR2', -1.25 * (1 - up))
+  } else {
+    sway(rig, 'ArmR1', 0.55 + breathe * 0.03)
+    sway(rig, 'ArmR2', -1.25)
+  }
+  rig.root.position.y = rig.rootRestY + breathe * 0.04
 }

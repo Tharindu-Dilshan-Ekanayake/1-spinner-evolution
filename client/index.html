@@ -3,12 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Power Per Click</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#2a8af5" />
+    <title>+1 Spinner Evolution</title>
 
-    <!-- Bloxity SDK. Exposes itself as window.Legion.SDK.
-         Must load before the Vite entry script below. -->
-    <script src="https://sdk.bloxity.io/v1/legion-sdk.min.js"></script>
+    <!-- Boxity SDK (window.Legion.SDK), always from Boxity, never bundled: party play
+         depends on it. It reads which environment it is in (prod, stage, local) from
+         the platform, so this one URL works everywhere.
+         async: it must not hold up the game's own scripts. bloxity/sdk.js waits for
+         it to appear, whatever order the two finish loading in, and nothing reaches
+         the matchmaker before it has. -->
+    <script async src="https://sdk.bloxity.io/v1/legion-sdk.min.js"></script>
   </head>
   <body>
     <div id="root"></div>

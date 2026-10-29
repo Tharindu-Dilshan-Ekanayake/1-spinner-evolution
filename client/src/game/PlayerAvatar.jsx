@@ -1,19 +1,19 @@
-import { useGLTF } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { forwardRef, useEffect, useMemo, useRef, useState } from 'react'
-import { Box3, MeshStandardMaterial, Vector3 } from 'three'
+import { forwardRef, use, useEffect, useMemo, useRef, useState } from 'react'
+import { Box3, DataTexture, MeshLambertMaterial, SRGBColorSpace, Vector3 } from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 
 import {
   assetUrls,
-  BASE_BODY_URL,
   isRealId,
   PART_SLOTS,
   skinCompositeUrl,
   skinIdOrDefault,
 } from '../bloxity/avatarAssets'
-import { loadOBJ, loadPartGLB, loadTexture } from '../bloxity/avatarLoader'
+import { loadBaseBody, loadOBJ, loadPartGLB, loadTexture } from '../bloxity/avatarLoader'
+import { applyEmote } from '../bloxity/emotes'
 import { useBloxity } from '../bloxity/BloxityContext'
+import { DEFAULT_PROPORTIONS } from '../bloxity/store'
 import {
   animateRig,
   applyPart,
@@ -21,6 +21,7 @@ import {
   applySkin,
   attachAccessory,
   collectRig,
+  gameProportions,
 } from './avatarRig'
 
 /**
@@ -32,6 +33,19 @@ function fallbackMotion(delta) {
   _idleMotion.time += delta
   return _idleMotion
 }
+
+/**
+ * A 1x1 white skin every avatar starts with. The material is compiled with a map from
+ * the start, so swapping in the real skin later is a texture change, not a fresh shader
+ * compile (that compile stalled the first second of play).
+ */
+const BLANK_SKIN = new DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1)
+BLANK_SKIN.colorSpace = SRGBColorSpace
+BLANK_SKIN.flipY = false
+BLANK_SKIN.needsUpdate = true
+
+/** Stand-in for the Bloxity loading helpers when assembling someone else's avatar. */
+const QUIET_GAME = { loadingStep() {}, loadingEnd() {}, updateRoom() {} }
 
 /**
  * The player's own Bloxity avatar, assembled at runtime.
@@ -46,18 +60,25 @@ function fallbackMotion(delta) {
  * whole thing re-assembles when `onAvatarChanged` / `onProportionsChanged` fire, so
  * changing cosmetics in the Bloxity portal updates the character live.
  *
- * @param {{ onReady?: () => void, targetHeight?: number }} props
+ * @param {{ onReady?: () => void, targetHeight?: number, remote?: { equipped, proportions } }} props
  *   `targetHeight` is the world-space height to fit the avatar into, in the game's
  *   own units. Bloxity authors the rig ~6.4 units tall with the feet at y=0, which is
  *   far bigger than a metric-scale physics capsule, so the model is measured and
  *   rescaled rather than trusted at native size.
+ *   `remote` draws another player's look (synced through the game server) instead of
+ *   the signed-in user's.
  */
 export const PlayerAvatar = forwardRef(function PlayerAvatar(
-  { onReady, targetHeight = 1.8, motionRef, ...props },
+  { onReady, onMounted, targetHeight = 1.8, motionRef, remote, ...props },
   ref,
 ) {
-  const { avatar: equipped, proportions, game } = useBloxity()
-  const { scene: baseScene } = useGLTF(BASE_BODY_URL)
+  const local = useBloxity()
+  const equipped = remote ? remote.equipped : local.avatar
+  const proportions = remote ? remote.proportions || DEFAULT_PROPORTIONS : local.proportions
+  // Only our own avatar reports to the Bloxity loading screen.
+  const game = remote ? QUIET_GAME : local.game
+  // Suspends until player.glb is in (shared by every avatar).
+  const { scene: baseScene } = use(loadBaseBody())
   const [assembled, setAssembled] = useState(false)
 
   // The GLTF cache hands back one shared scene. Clone via SkeletonUtils so this
@@ -70,12 +91,10 @@ export const PlayerAvatar = forwardRef(function PlayerAvatar(
 
     // The base body ships with an empty texture; give every skinned mesh its own
     // material instance so a skin swap here can't leak into another avatar.
+    // Lambert: the same fully matte look as a rough, non-metal standard material,
+    // for a fraction of the shader cost.
     for (const mesh of collected.skinnedMeshes) {
-      mesh.material = new MeshStandardMaterial({
-        color: 0xffffff,
-        metalness: 0,
-        roughness: 1,
-      })
+      mesh.material = new MeshLambertMaterial({ color: 0xffffff, map: BLANK_SKIN })
     }
 
     if (!collected.skeleton) {
@@ -136,6 +155,9 @@ export const PlayerAvatar = forwardRef(function PlayerAvatar(
     // Accessories.
     for (const [kind, idKey, meshUrl, texUrl] of [
       ['hat', 'hatId', assetUrls.hatMesh, assetUrls.hatTexture],
+      // Hair and masks are worn with a hat, and load exactly like one.
+      ['hair', 'hairId', assetUrls.hatMesh, assetUrls.hatTexture],
+      ['mask', 'maskId', assetUrls.hatMesh, assetUrls.hatTexture],
       ['back', 'backId', assetUrls.backMesh, assetUrls.backTexture],
     ]) {
       const id = equipped?.[idKey]
@@ -162,7 +184,7 @@ export const PlayerAvatar = forwardRef(function PlayerAvatar(
               if (result.texture) {
                 result.object.traverse((child) => {
                   if (child.isMesh) {
-                    child.material = new MeshStandardMaterial({ map: result.texture })
+                    child.material = new MeshLambertMaterial({ map: result.texture })
                   }
                 })
               }
@@ -194,19 +216,30 @@ export const PlayerAvatar = forwardRef(function PlayerAvatar(
   // Applied per frame rather than in an effect: every bone is reset to its rest pose
   // and re-scaled each pass, which keeps it idempotent and survives anything else
   // that touches the skeleton.
-  const proportionsRef = useRef(proportions)
-  proportionsRef.current = proportions
+  // The player's own proportions, with this game's body shape on top.
+  const body = useMemo(() => gameProportions(proportions), [proportions])
+  const bodyRef = useRef(body)
+  bodyRef.current = body
 
   useFrame((_state, delta) => {
     try {
       // Order matters: proportions reset every bone to its rest pose, and the
       // animation then rotates on top of that clean base.
-      applyProportions(rig, proportionsRef.current)
-      animateRig(rig, motionRef?.current ?? fallbackMotion(delta))
+      applyProportions(rig, bodyRef.current)
+      const motion = motionRef?.current ?? fallbackMotion(delta)
+      animateRig(rig, motion)
+      // A Boxity emote plays over the pose (see bloxity/emotes.js).
+      if (motion.boxity) applyEmote(rig, motion.boxity, motion.time)
     } catch {
       // A malformed payload must not kill the render loop.
     }
   })
+
+  // The base body is on screen as soon as this component renders (useGLTF suspends
+  // until then); cosmetics may still be streaming in.
+  useEffect(() => {
+    onMounted?.()
+  }, [onMounted])
 
   // Signal readiness only once the model is actually standing there.
   useEffect(() => {
@@ -224,6 +257,7 @@ export const PlayerAvatar = forwardRef(function PlayerAvatar(
   )
 })
 
-useGLTF.preload(BASE_BODY_URL)
+// Start downloading the body as soon as this module loads.
+loadBaseBody()
 
 export default PlayerAvatar
