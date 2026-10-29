@@ -16,6 +16,8 @@ html,
 body,
 #root {
   height: 100%;
+  /* The visible height on phones (their browser bars come and go): see App.jsx. */
+  max-height: 100dvh;
   margin: 0;
   overflow: hidden;
   overscroll-behavior: none;
