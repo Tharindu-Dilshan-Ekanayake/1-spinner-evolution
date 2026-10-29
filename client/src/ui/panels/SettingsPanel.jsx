@@ -4,6 +4,7 @@ import { formatNumber } from '@shared'
 
 import { audioSettings, setVolume } from '../../audio/audio'
 import { useBloxity } from '../../bloxity/BloxityContext'
+import { embeddedInBoxity } from '../../bloxity/sdk'
 import { useGameStore } from '../../store/gameStore'
 import { useQualityStore } from '../../store/qualityStore'
 import { formatTime } from '../actions'
@@ -35,7 +36,7 @@ export default function SettingsPanel() {
   const st = profile.stats || {}
 
   return (
-    <Panel title="Settings" icon="⚙️" color="g-gray" onClose={close}>
+    <Panel title="Settings" icon="gear" onClose={close}>
       <div className="stroke mb-1 text-xl">Graphics</div>
       <div className="grid grid-cols-4 gap-2">
         <button type="button" className={`gbtn ${auto ? 'g-green' : 'g-dark'} stroke py-1 text-lg`} onClick={enableAuto}>
@@ -69,7 +70,9 @@ export default function SettingsPanel() {
           <div className="stroke text-lg">{name}</div>
           <div className="stroke-sm text-xs">{isLoggedIn ? 'Signed in with Bloxity — progress saved to your account' : 'Playing as guest — progress saved on this device'}</div>
         </div>
-        {isLoggedIn ? (
+        {/* Inside Boxity its toolbar signs players in and out; only a page outside
+            Boxity gets the game's own buttons. */}
+        {embeddedInBoxity() ? null : isLoggedIn ? (
           <button type="button" className="gbtn g-gray stroke px-3 py-1" onClick={logout}>
             Log out
           </button>

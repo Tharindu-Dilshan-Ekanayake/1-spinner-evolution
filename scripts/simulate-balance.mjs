@@ -3,19 +3,19 @@
  * milestone takes. Run with `npm run simulate` from the repo root.
  *
  * The bot trains (clicking ~4 times a second), runs stages as deep as its army can
- * win, spends wins on the best capsule / trail / aura it can afford, crafts golden
- * spinners and rebirths as soon as it may. It ignores gifts, quests, potions and
- * Halloween, so real players progress somewhat faster than this.
+ * win, spends wins on the best spinner / trail / aura it can afford, crafts golden
+ * spinners and rebirths as soon as it may. It ignores gifts, quests and potions, so
+ * real players progress somewhat faster than this.
  *
  * Battle outcome uses the same model the server's sim converges to: an army wins when
  * its (total HP x total damage) beats the enemy's by a margin.
  */
 import {
   AURA_LIST,
-  CAPSULE_LIST,
   CRYSTAL_OFFER,
   GOLDEN,
   RING_LIST,
+  SHOP_ITEMS,
   TRAIL_LIST,
   WORLD_LIST,
 } from '../shared/content.js'
@@ -26,7 +26,7 @@ import {
   levelNeed,
   rebirthLevelReq,
   resetFormulaCaches,
-  rollCapsule,
+  spinnerPrice,
   spinnerScore,
   spinnerStats,
   stageArmy,
@@ -41,30 +41,18 @@ const WIN_MARGIN = 1.6
 const TRAIN_CHUNK = 90
 const STAGE_OVERHEAD = 8
 const RUN_OVERHEAD = 12
-const OPEN_SECONDS = 1.2
-const MAX_OPENS_PER_TRIP = 60
+const BUY_SECONDS = 1.2
+const MAX_BUYS_PER_TRIP = 60
 
-function mulberry32(seed) {
-  let a = seed
-  return () => {
-    a = (a + 0x6d2b79f5) | 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-function run(overrides = {}, { quiet = false, seed = 1 } = {}) {
+function run(overrides = {}, { quiet = false } = {}) {
   Object.assign(TUNING, overrides)
   resetFormulaCaches()
-  const rand = mulberry32(seed)
 
   let uid = 0
   const p = {
     level: 1,
     power: 0,
     wins: 0,
-    candy: 0,
     rebirths: 0,
     inventory: [{ uid: ++uid, id: 'rookie', golden: false }],
     equipped: [],
@@ -176,7 +164,7 @@ function run(overrides = {}, { quiet = false, seed = 1 } = {}) {
   }
 
   const shop = () => {
-    let opened = 0
+    let buys = 0
     let bought = true
     while (bought) {
       bought = false
@@ -205,18 +193,28 @@ function run(overrides = {}, { quiet = false, seed = 1 } = {}) {
         bought = true
         continue
       }
-      const capsule = [...CAPSULE_LIST]
-        .reverse()
-        .find((c) => c.currency === 'wins' && c.id !== 'exclusive' && p.rebirths >= c.rebirths && p.wins >= c.cost)
-      if (capsule && opened < MAX_OPENS_PER_TRIP) {
-        p.wins -= capsule.cost
-        const id = rollCapsule(capsule.id, false, rand)
-        p.inventory.push({ uid: ++uid, id, golden: false })
-        mark(`cap-${capsule.id}`, `first ${capsule.name}`)
-        // Opening animation + auto-open delay.
-        t += OPEN_SECONDS
-        opened += 1
-        bought = true
+      // The strongest spinner it can buy, if it helps: a free slot, beats the weakest
+      // team member, or (enough wins for a full set) its golden copy would.
+      if (buys < MAX_BUYS_PER_TRIP) {
+        const slots = computeStats(p).slots
+        const team = p.equipped.map((u) => p.inventory.find((s) => s.uid === u))
+        const weakest = team.length < slots ? -1 : Math.min(...team.map((s) => spinnerScore(s.id, s.golden)))
+        const pick = Object.entries(SHOP_ITEMS)
+          .filter(([id, it]) => it.currency === 'wins' && p.rebirths >= it.rebirths && p.wins >= spinnerPrice(id))
+          .map(([id]) => id)
+          .sort((a, b) => spinnerScore(b) - spinnerScore(a))[0]
+        const have = pick ? p.inventory.filter((s) => s.id === pick && !s.golden).length : 0
+        const forGolden =
+          pick && spinnerScore(pick, true) > weakest && p.wins >= spinnerPrice(pick) * (GOLDEN.craftCount - (have % GOLDEN.craftCount))
+        if (pick && (spinnerScore(pick) > weakest || forGolden)) {
+          p.wins -= spinnerPrice(pick)
+          p.inventory.push({ uid: ++uid, id: pick, golden: false })
+          mark(`buy-${SHOP_ITEMS[pick].tier}`, `first from ${SHOP_ITEMS[pick].tier} (${pick})`)
+          t += BUY_SECONDS
+          buys += 1
+          bought = true
+          equipBest()
+        }
       }
     }
     // Craft golden copies, then keep the inventory lean.
@@ -248,13 +246,12 @@ function run(overrides = {}, { quiet = false, seed = 1 } = {}) {
     stageRun()
     shop()
     if (p.level >= rebirthLevelReq(p.rebirths)) {
-      // Final push of the cycle, spend everything, then rebirth.
+      // Final push of the cycle, then rebirth (wins are kept, as on the server).
       stageRun()
       shop()
       p.rebirths += 1
       p.level = 1
       p.power = 0
-      p.wins = 0
       equipBest()
       cycles.push(t - cycleStart)
       cycleStart = t

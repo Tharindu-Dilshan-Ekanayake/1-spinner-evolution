@@ -16,6 +16,7 @@ import Lighting from './Lighting'
 import LocalPlayer from './LocalPlayer'
 import { GameLoop } from './loop'
 import Effects from './render/Effects'
+import { Guide } from './world/Guide'
 import RemotePlayers from './RemotePlayers'
 import { THEMES } from './sceneStyle'
 import Sky from './Sky'
@@ -28,11 +29,11 @@ import Lobby from './world/Lobby'
 const WORLDS = {
   lava: lazy(() => import('./world/worlds/LavaWorld')),
   galaxy: lazy(() => import('./world/worlds/GalaxyWorld')),
-  halloween: lazy(() => import('./world/worlds/HalloweenWorld')),
 }
 
 // r3f-perf (draw calls, triangles, GPU time) in development builds only.
-const Perf = import.meta.env.DEV ? lazy(() => import('r3f-perf').then((m) => ({ default: m.Perf }))) : null
+// The r3f-perf overlay (GPU / CPU / FPS) is a developer tool: dev builds only, and only with ?perf.
+const Perf = import.meta.env.DEV && new URLSearchParams(window.location.search).has('perf') ? lazy(() => import('r3f-perf').then((m) => ({ default: m.Perf }))) : null
 
 /** A click/tap on the 3D view: boost spinners in battle, train faster at a ring. */
 function handleTap() {
@@ -69,11 +70,13 @@ function FirstFrameSignal({ onFirstFrame }) {
 function DebugHandle() {
   const gl = useThree((s) => s.gl)
   const scene = useThree((s) => s.scene)
+  const camera = useThree((s) => s.camera)
   useEffect(() => {
     if (!DEBUG) return undefined
     window.__game = {
       live,
       sceneRef: scene,
+      cameraRef: camera,
       store: useGameStore,
       quality: useQualityStore,
       send,
@@ -111,7 +114,7 @@ function DebugHandle() {
     return () => {
       delete window.__game
     }
-  }, [gl, scene])
+  }, [gl, scene, camera])
   return null
 }
 
@@ -157,6 +160,9 @@ function ZoneContent({ zone }) {
   return World ? <World /> : null
 }
 
+/** Seconds after the game settles before the frame-rate monitor may lower quality. */
+const MONITOR_DELAY_MS = 5000
+
 export function GameScene({ onFirstFrame, onAvatarReady, onAvatarMounted, onZoneReady }) {
   const zone = useGameStore((s) => s.zone)
   const q = useQuality()
@@ -167,6 +173,14 @@ export function GameScene({ onFirstFrame, onAvatarReady, onAvatarMounted, onZone
   const [zoneMounted, setZoneMounted] = useState(false)
   const [warm, setWarm] = useState(false)
   const theme = THEMES[zone] || THEMES.lobby
+  const settled = useGameStore((s) => s.settled)
+  const adBreak = useGameStore((s) => s.adBreak)
+  const [monitoring, setMonitoring] = useState(false)
+  useEffect(() => {
+    if (!settled) return undefined
+    const t = setTimeout(() => setMonitoring(true), MONITOR_DELAY_MS)
+    return () => clearTimeout(t)
+  }, [settled])
 
   const handleZoneMounted = useCallback(() => {
     setZoneMounted(true)
@@ -211,14 +225,20 @@ export function GameScene({ onFirstFrame, onAvatarReady, onAvatarMounted, onZone
         flat
         dpr={q.dpr}
         gl={{ antialias: q.antialias, powerPreference: 'high-performance', stencil: false }}
-        camera={{ position: [0, 8, 44], fov: 60, near: 0.3, far: q.viewDistance + 120 }}
+        // near 0.6, not 0.3: depth precision far away is proportional to it, and thin
+        // details flicker (z-fighting) when it runs out. The camera never comes closer
+        // than 0.8 to a wall or 1.5 to the player (see FollowCamera).
+        camera={{ position: [0, 8, 44], fov: 60, near: 0.6, far: q.viewDistance + 120 }}
         onCreated={onCreated}
-        frameloop={warm ? 'always' : 'never'}
+        // Held during Boxity ad breaks (and until the first world is ready).
+        frameloop={warm && !adBreak ? 'always' : 'never'}
       >
         <ShaderWarmup ready={zoneMounted && !warm} onWarm={handleWarm} />
         <color attach="background" args={[theme.sky.horizon]} />
         <fog attach="fog" args={[theme.fog.color, Math.min(theme.fog.near, fogFar * 0.5), fogFar]} />
-        <PerformanceMonitor onDecline={drop} flipflops={3} bounds={() => [45, 58]} />
+        {/* Only judges frame rate once the game has settled: the one-off hitches while
+            loading must not drop anyone to LOW for good. */}
+        {monitoring && <PerformanceMonitor onDecline={drop} flipflops={3} bounds={() => [45, 58]} />}
         <GameLoop />
         <Sky theme={theme} />
         <Lighting theme={theme} />
@@ -233,6 +253,7 @@ export function GameScene({ onFirstFrame, onAvatarReady, onAvatarMounted, onZone
         </Suspense>
 
         <Effects />
+        <Guide />
         <Pets />
         <BattleView />
         <FollowCamera onTap={handleTap} />

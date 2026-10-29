@@ -15,12 +15,15 @@ export const C2S = {
   giveUp: 'giveUp',
   collectRun: 'collectRun',
   teleport: 'teleport',
-  openCapsule: 'openCapsule',
+  /** { id } buy a spinner from the Spinners Shop. */
+  buySpinner: 'buySpinner',
   buyCrystal: 'buyCrystal',
   equip: 'equip',
   unequip: 'unequip',
   equipBest: 'equipBest',
   unequipAll: 'unequipAll',
+  /** { slot, uid }: put that spinner in that team slot (swapping if it's in another). */
+  equipSlot: 'equipSlot',
   deleteSpinners: 'deleteSpinners',
   lockSpinner: 'lockSpinner',
   craftGolden: 'craftGolden',
@@ -32,9 +35,10 @@ export const C2S = {
   usePotion: 'usePotion',
   claimGift: 'claimGift',
   claimDaily: 'claimDaily',
-  pumpkin: 'pumpkin',
   autoWin: 'autoWin',
   ping: 'ping',
+  /** { id } a Boxity emote to play (Boxity's own picker sends it; see bloxity/emotes.js). */
+  emote: 'emote',
   /** Test-only: ignored unless the server runs with ALLOW_CHEATS=1. */
   debug: 'debug',
 }
@@ -60,7 +64,8 @@ export const S2C = {
 }
 
 /** Animation states packed into the schema's `anim` byte. */
-export const ANIM = { idle: 0, run: 1, jump: 2, battle: 3 }
+/** Avatar animation state, synced for other players. cheer/defeat: after a battle. */
+export const ANIM = { idle: 0, run: 1, jump: 2, battle: 3, cheer: 4, defeat: 5 }
 
 export const BATTLE = {
   tickMs: 50,

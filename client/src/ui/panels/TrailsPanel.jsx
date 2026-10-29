@@ -3,6 +3,7 @@ import { C2S, TRAIL_LIST, formatNumber } from '@shared'
 import { useGameStore } from '../../store/gameStore'
 import { act } from '../actions'
 import { Panel } from '../common'
+import ShopTabs from './ShopTabs'
 
 function Swatch({ colors }) {
   return (
@@ -17,7 +18,8 @@ export default function TrailsPanel() {
   const profile = useGameStore((s) => s.profile)
   const close = useGameStore((s) => s.closePanel)
   return (
-    <Panel title="TRAILS" icon="💫" color="g-green" onClose={close}>
+    <Panel title="TRAILS" icon="sneaker" wide onClose={close}>
+      <ShopTabs />
       <div className="flex flex-col gap-2">
         {TRAIL_LIST.map((t) => {
           const owned = profile.trails.includes(t.id)

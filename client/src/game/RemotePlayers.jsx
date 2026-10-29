@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { ANIM } from '@shared'
+
 import { useGameStore } from '../store/gameStore'
 import { live } from '../store/live'
 import { quality, useQuality } from '../store/qualityStore'
 import { ORDER, useSystem } from './loop'
+import { bubbleFor } from '../bloxity/chatBubbles'
 import { overlay } from './overlay/worldOverlay'
+import { turnAwareSpeed } from './avatarRig'
 import PlayerAvatar from './PlayerAvatar'
 
 const NAME_HEIGHT = 2.55
@@ -35,6 +39,9 @@ function useRemoteInterpolation() {
       const dz = r.z - p.z
       if (dx * dx + dz * dz < maxD * maxD * 0.25) {
         overlay.name(state.camera, r.x, r.y + NAME_HEIGHT, r.z, r.name, r.sub)
+        // Their latest Boxity chat line, just above the name tag.
+        const line = bubbleFor(r.uid)
+        if (line) overlay.bubble(state.camera, r.x, r.y + NAME_HEIGHT + 0.9, r.z, line)
       }
     }
   })
@@ -63,8 +70,16 @@ function RemotePlayer({ id }) {
     if (visualRef.current) visualRef.current.rotation.y = r.ry
     const m = motionRef.current
     m.time += dt
-    m.speed = r.speed
+    m.speed = turnAwareSpeed(m, r.ry, r.speed, m.maxSpeed, dt)
+    const emote = r.anim === ANIM.cheer ? 'cheer' : r.anim === ANIM.defeat ? 'defeat' : null
+    if (emote !== m.emote) {
+      m.emote = emote
+      m.emoteStart = m.time
+    }
     m.grounded = r.anim !== 2
+    // Their Boxity emote, until they move.
+    if (r.boxityEmote && (r.boxityEmote.done || r.anim !== ANIM.idle || r.speed > 0.6)) r.boxityEmote = null
+    m.boxity = r.boxityEmote
   })
 
   return (

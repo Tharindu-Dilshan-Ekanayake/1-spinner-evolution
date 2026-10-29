@@ -1,11 +1,14 @@
 import { useRef } from 'react'
 
-import { GRAVITY, JUMP_SPEED, PLAYER_RADIUS, STAGE, WALK_SPEED, WORLDS, gateFront, worldOfZone } from '@shared'
+import { ANIM, GRAVITY, JUMP_SPEED, PLAYER_RADIUS, RING_POSITIONS, STAGE, WALK_SPEED, WORLDS, gateFront, worldOfZone } from '@shared'
 
 import { sfx } from '../audio/sfx'
+import { SELF, bubbleFor } from '../bloxity/chatBubbles'
 import { live } from '../store/live'
 import { groundAt, resolveSolids, solidTopAt } from './collision'
 import { ORDER, useSystem } from './loop'
+import { EMOTE_SECONDS, turnAwareSpeed } from './avatarRig'
+import { overlay } from './overlay/worldOverlay'
 import PlayerAvatar from './PlayerAvatar'
 
 const PLAYER_HEIGHT = 1.8
@@ -51,9 +54,9 @@ export function LocalPlayer({ onAvatarReady, onAvatarMounted }) {
    * Motion state handed to the avatar so it can pose itself. A ref, not state:
    * this is written every frame and must not trigger a re-render.
    */
-  const motionRef = useRef({ time: 0, speed: 0, grounded: true, maxSpeed: WALK_SPEED })
+  const motionRef = useRef({ time: 0, speed: 0, grounded: true, maxSpeed: WALK_SPEED, emote: null, emoteStart: 0, emoteFor: null })
 
-  useSystem(ORDER.player, (dt) => {
+  useSystem(ORDER.player, (dt, state) => {
     const p = live.player
     const input = live.input
     const frozen = Boolean(live.battle) || p.frozen
@@ -113,18 +116,44 @@ export function LocalPlayer({ onAvatarReady, onAvatarMounted }) {
       // Face the arena while our spinners fight.
       const b = live.battle
       p.ry = lerpAngle(p.ry, Math.atan2(b.cx - p.x, b.cz - p.z), 1 - Math.pow(0.01, dt))
+    } else if (live.ring) {
+      // On a training pad: face the ring and watch the spinners train.
+      const c = RING_POSITIONS[live.ring]
+      p.ry = lerpAngle(p.ry, Math.atan2(c.x - p.x, c.z - p.z), 1 - Math.pow(0.01, dt))
     }
     p.speed = horizontal
-    p.anim = !p.grounded ? 2 : horizontal > 0.6 ? 1 : 0
+
+    // --- Victory / defeat emote, from the battle result until you walk off -----------
+    const motion = motionRef.current
+    const fight = live.battle
+    if (fight && fight.ended && motion.emoteFor !== fight) {
+      motion.emoteFor = fight
+      motion.emote = fight.result === 'win' ? 'cheer' : 'defeat'
+      motion.emoteStart = motion.time
+    }
+    if (motion.emote && (motion.time - motion.emoteStart > EMOTE_SECONDS || (!frozen && (horizontal > 0.6 || !p.grounded)))) {
+      motion.emote = null
+    }
+    // A Boxity emote (sent by Boxity's own picker, see bloxity/platform.js) plays until
+    // you move, a fight starts or the clip ends.
+    const boxity = live.player.boxityEmote
+    if (boxity && (boxity.done || motion.emote || live.battle || (!frozen && (horizontal > 0.6 || !p.grounded)))) {
+      live.player.boxityEmote = null
+    }
+    motion.boxity = live.player.boxityEmote
+    if (motion.emote) p.anim = motion.emote === 'cheer' ? ANIM.cheer : ANIM.defeat
+    else p.anim = !p.grounded ? ANIM.jump : horizontal > 0.6 ? ANIM.run : ANIM.idle
     p.airTime = p.grounded ? 0 : p.airTime + dt
 
     const group = groupRef.current
     if (group) group.position.set(p.x, p.y, p.z)
+    // Our own latest Boxity chat line, above our head.
+    const line = bubbleFor(SELF)
+    if (line) overlay.bubble(state.camera, p.x, p.y + 2.9, p.z, line)
     if (visualRef.current) visualRef.current.rotation.y = p.ry
 
-    const motion = motionRef.current
     motion.time += dt
-    motion.speed = horizontal
+    motion.speed = turnAwareSpeed(motion, p.ry, horizontal, speed, dt)
     motion.grounded = p.grounded
     motion.maxSpeed = speed
   })

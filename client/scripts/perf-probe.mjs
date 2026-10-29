@@ -152,7 +152,8 @@ async function run(viewport, label, presets) {
   await measure(page, `${label}-lobby-training-view`)
 
   // Training at the Beginner ring (pets attack the dummy).
-  await moveTo(page, -20 + 9.6, 32, -Math.PI / 2)
+  // Standing on the Beginner ring's training pad.
+  await moveTo(page, -5.8, 30, -Math.PI / 2)
   await page.evaluate(() => {
     let n = 0
     const t = setInterval(() => {
@@ -165,16 +166,19 @@ async function run(viewport, label, presets) {
   // Left: the Wins Shop. Right: the leaderboards.
   await moveTo(page, -16, 0, -Math.PI / 2)
   await measure(page, `${label}-lobby-shop-view`)
-  await moveTo(page, 26, 0, Math.PI / 2)
+  await moveTo(page, 14, 0, Math.PI / 2)
   await measure(page, `${label}-lobby-leaderboards-view`)
 
   // Capsule popup.
-  await moveTo(page, -30, -3.5, Math.PI)
+  await moveTo(page, -19.5, 15, -Math.PI / 2)
   await measure(page, `${label}-capsule`, { settle: 1500 })
 
   // A fair fight first: the starter team against stage 1, right in front of the lobby.
   await moveTo(page, 0, -14)
   await measure(page, `${label}-stage-gate`)
+  // Walked in through the open gate, beside the blue pad: arena, champion, stands.
+  await moveTo(page, 6, -42, Math.PI)
+  await measure(page, `${label}-stage-inside`)
   await battle(page, `${label}-grassland-battle`)
   // After the win: the Return pad and the Stage 2 gate past the arena.
   await moveTo(page, 4, -74, Math.PI)
@@ -185,10 +189,9 @@ async function run(viewport, label, presets) {
   await send(page, 'debug', {
     rebirths: 8,
     wins: 5e6,
-    candy: 500,
     level: 40,
-    best: { grassland: 10, lava: 20, galaxy: 22, halloween: 3 },
-    give: ['crystal', 'phoenix_blade', 'galaxy_core', 'void_star', 'storm_blade', 'pumpkin_spin', 'ghost_whirl', 'violet_fang'],
+    best: { grassland: 10, lava: 20, galaxy: 22 },
+    give: ['crystal', 'phoenix_blade', 'galaxy_core', 'void_star', 'storm_blade', 'thunder_god', 'dragon_fury', 'violet_fang'],
   })
   await sleep(1200)
   await page.evaluate(() => window.__game.store.getState().setPanel('spinners'))
@@ -198,19 +201,20 @@ async function run(viewport, label, presets) {
   await moveTo(page, 0, 0)
   await measure(page, `${label}-lobby-full-team`)
 
-  for (const world of ['lava', 'galaxy', 'halloween']) {
+  for (const world of ['galaxy', 'lava']) {
     await teleport(page, world)
     await measure(page, `${label}-${world}-spawn`)
   }
-  await battle(page, `${label}-halloween-battle`)
+  // A battle in another world's arena (Lava's Stage 11), next to the lobby's.
+  await battle(page, `${label}-lava-battle`)
 
   await browser.close()
 }
 
-/** Touch stage 1's gate, screenshot mid-fight, measure, then the result. */
+/** Stand on stage 1's blue pad, screenshot mid-fight, measure, then the result. */
 async function battle(page, name) {
-  // Gate 1's glass is at z = -34; pressing against it starts the fight.
-  await moveTo(page, 0, -32.8, Math.PI)
+  // Gate 1 is at z = -34 and open; its blue pad is 6.5 behind it. Standing there fights.
+  await moveTo(page, 0, -40.5, Math.PI)
   await page.waitForFunction(() => window.__game.live.battle, { timeout: 15000 }).catch(() => {})
   // Countdown is 2.2s; catch the clash right after it.
   await sleep(3000)
@@ -226,7 +230,7 @@ async function battle(page, name) {
   await page.waitForFunction(() => window.__game.store.getState().battleResult, { timeout: 60000 }).catch(() => {})
   await sleep(400)
   await page.screenshot({ path: path.join(OUT, `${name}-result.png`) })
-  // After a win the gate behind you slides open: look back at it from the arena side.
+  // After a win gate 2 opens: look back at gate 1 and the champion from the arena side.
   await sleep(2600)
   await moveTo(page, 9, -39, 0)
   await sleep(1500)

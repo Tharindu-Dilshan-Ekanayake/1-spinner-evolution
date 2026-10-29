@@ -3,8 +3,11 @@ import { C2S, LOBBY, S2C, SPINNERS, TRAILS, computeStats, formatNumber, rarityOf
 
 import { playMusic } from '../audio/music'
 import { sfx } from '../audio/sfx'
+import { bloxityEnv } from '../bloxity/environment'
+import { startEmote } from '../bloxity/emotes'
+import { getSDK, safeCall, waitForSDK } from '../bloxity/sdk'
 import { getBloxityState, useBloxityStore } from '../bloxity/store'
-import { SERVER_URL } from '../config'
+import { BLOXITY_HOSTING_ID, SERVER_URL } from '../config'
 import { createBattle, endBattle, feedFrame } from '../game/battle/battleState'
 import { gameState, useGameStore } from '../store/gameStore'
 import { live, pushFx } from '../store/live'
@@ -12,21 +15,35 @@ import { live, pushFx } from '../store/live'
 /**
  * The Colyseus connection: join, keep other players mirrored into `live.remotes`,
  * and route every server message to the store (HUD), `live` (frame loop) or sounds.
+ *
+ * Hosted on Boxity (VITE_BLOXITY_HOSTING_ID set), every connect asks Boxity's
+ * matchmaker for an endpoint first (Legion.SDK.net.resolveEndpoint) and builds a new
+ * Client for it: that is what lets Boxity start more servers, keep parties together
+ * and seat invited friends. Never connect to <id>.host.bloxity.io directly. Without a
+ * hosting id (local dev, or a server hosted elsewhere) the game connects to SERVER_URL.
  */
 
 const GUEST_KEY = 'spinner_guest_id'
 const GUEST_NAME_KEY = 'spinner_guest_name'
 const LAST_IDENTITY_KEY = 'spinner_last_identity'
 const MOVE_HZ = 12
-const RECONNECT_MS = 3000
+/** Retry delays grow to this; a cold Boxity server can take ~45 s to start. */
+const RETRY_MAX_MS = 8000
+const GIVE_UP_MS = 60000
 
 let client = null
+/** The endpoint `client` talks to (rejoining the same room reuses it). */
+let endpoint = null
 let room = null
 let moveTimer = null
 let reconnectTimer = null
 let connecting = false
 let joinedUserId = null
 let lastSent = [NaN, NaN, NaN, NaN, NaN]
+let failingSince = 0
+let retries = 0
+/** A room to join first, once: ?roomId= (Boxity's Join button, friend invites). */
+let wantedRoomId = new URLSearchParams(window.location.search).get('roomId')
 
 function guestId() {
   try {
@@ -70,7 +87,11 @@ function guestName(guest) {
 
 function identity() {
   const { user, guest, equipped, proportions } = getBloxityState()
+  const sdk = getSDK()
   return {
+    // The server only trusts the token (checked with Boxity); the id is for the matchmaker.
+    token: (user && safeCall(sdk?.auth?.getToken?.bind(sdk.auth))) || null,
+    gameSlug: import.meta.env.VITE_GAME_SLUG || '',
     userId: user?._id || user?.id || null,
     guestId: guestId(),
     name: user ? user.displayName || user.username || 'Player' : guestName(guest),
@@ -121,6 +142,10 @@ function copyPlayer(r, p) {
   r.ring = p.ring
   r.battling = p.battling
   r.avatar = p.avatar
+  r.uid = p.uid
+  // A new emote started (the seq ticks); the first sync only records where it is.
+  if (r.emoteSeq !== undefined && r.emoteSeq !== p.emoteSeq) r.boxityEmote = startEmote(p.emote)
+  r.emoteSeq = p.emoteSeq
   const zoneChanged = r.zone !== p.zone
   r.zone = p.zone
   if (zoneChanged) {
@@ -144,8 +169,16 @@ function syncTeam(r, p) {
 
 function bindState(r0) {
   const cb = Callbacks.get(r0)
+  // Players there when we arrive vs. joining later (Boxity's friend-join toasts).
+  let arriving = true
+  r0.onStateChange.once(() => {
+    arriving = false
+  })
   cb.onAdd('players', (p, sessionId) => {
     if (sessionId === r0.sessionId) return
+    const sdk = getSDK()
+    if (arriving) safeCall(sdk?.game?.playerInRoom?.bind(sdk.game), p.name)
+    else safeCall(sdk?.game?.playerJoined?.bind(sdk.game), p.name)
     const r = {
       id: sessionId,
       x: p.x,
@@ -221,7 +254,6 @@ function bindMessages(r0) {
 
   r0.onMessage(S2C.profile, ({ profile, quest, daily }) => {
     live.team = teamFromProfile(profile)
-    live.pumpkins = profile.pumpkins || {}
     live.player.speedMult = 1 + (TRAILS[profile.trail]?.speed || 0)
     live.profileCosmetics = { aura: profile.aura, trail: profile.trail }
     store.setState({ profile, quest, daily, giftsAt: Date.now() })
@@ -288,13 +320,7 @@ function bindMessages(r0) {
   r0.onMessage(S2C.leaderboards, (leaderboards) => store.setState({ leaderboards }))
 
   r0.onMessage(S2C.reward, (msg) => {
-    if (msg.pumpkin) {
-      live.pumpkins = { ...live.pumpkins, [msg.pumpkin]: Date.now() + 90000 }
-      pushFx('pickup', live.player.x, live.player.y + 1, live.player.z)
-      sfx.pickup()
-    } else {
-      sfx.buy()
-    }
+    sfx.buy()
     gameState().pushReward(msg)
   })
 
@@ -336,18 +362,76 @@ function startMoveLoop() {
  * Connect / reconnect
  * ------------------------------------------------------------------------- */
 
-export async function connect() {
+/**
+ * A Client for this connect. Hosted on Boxity: a fresh endpoint from the matchmaker
+ * each time (each is pinned to one server, so a Client is never reused across them).
+ */
+async function openClient(id) {
+  if (!BLOXITY_HOSTING_ID) {
+    if (!client) client = new Client(SERVER_URL)
+    endpoint = SERVER_URL
+    return client
+  }
+  const sdk = await waitForSDK()
+  const resolved = await sdk.net.resolveEndpoint(BLOXITY_HOSTING_ID, { userId: id.userId || id.guestId })
+  endpoint = resolved.endpoint
+  client = new Client(endpoint)
+  return client
+}
+
+/** Joins the ?roomId= room if it still exists (on Boxity: on the server that holds it). */
+async function joinWanted(id, roomId) {
+  if (!BLOXITY_HOSTING_ID) return (await openClient(id)).joinById(roomId, id)
+  const res = await fetch(`${bloxityEnv().playUrl}/v1/dir/${encodeURIComponent(BLOXITY_HOSTING_ID)}/list`)
+  const body = await res.json()
+  const list = Array.isArray(body) ? body : body?.rooms || []
+  const entry = list.find((r) => r?.roomId === roomId || r?.id === roomId)
+  if (!entry?.joinUrl) throw new Error('room not listed')
+  endpoint = entry.joinUrl
+  client = new Client(endpoint)
+  return client.joinById(roomId, id)
+}
+
+/** Tries again a little later, backing off; gives up after a minute of failures. */
+function retryLater(err) {
+  if (!failingSince) failingSince = Date.now()
+  if (Date.now() - failingSince > GIVE_UP_MS) {
+    useGameStore.setState({ status: 'error', error: 'Could not reach the game server. Reload to try again.' })
+    return
+  }
+  useGameStore.setState({ status: 'error', error: String(err?.message || err) })
+  reconnectTimer = setTimeout(connect, Math.min(RETRY_MAX_MS, 1000 * 2 ** retries))
+  retries += 1
+}
+
+/**
+ * Joins (or rejoins) the world. `sameRoom` rejoins the room we were in, on the same
+ * server - used when the player signs in mid-game, so they stay with their friends.
+ */
+export async function connect(sameRoom = null) {
   if (connecting || room) return
   connecting = true
   clearTimeout(reconnectTimer)
   useGameStore.setState({ status: 'connecting', error: null })
   try {
-    client = client || new Client(SERVER_URL)
     const id = identity()
     joinedUserId = id.userId
     performance.mark('net:join-start')
-    const r0 = await client.joinOrCreate('world', id)
+    let r0 = null
+    const target = sameRoom || (wantedRoomId ? { roomId: wantedRoomId } : null)
+    wantedRoomId = null
+    if (target) {
+      try {
+        r0 = target.endpoint ? await new Client(target.endpoint).joinById(target.roomId, id) : await joinWanted(id, target.roomId)
+      } catch (err) {
+        // Gone or full: fall back to normal matchmaking.
+        console.warn('[net] could not rejoin room', target.roomId, err?.message || err)
+      }
+    }
+    if (!r0) r0 = await (await openClient(id)).joinOrCreate('world', id)
     performance.mark('net:joined')
+    failingSince = 0
+    retries = 0
     storage(LAST_IDENTITY_KEY, id.userId ? 'user' : 'guest')
     room = r0
     live.selfId = r0.sessionId
@@ -358,25 +442,31 @@ export async function connect() {
     live.camera.yaw = LOBBY.spawn.ry + Math.PI
     bindState(r0)
     bindMessages(r0)
+    // The lobby is joinable: tell Boxity, so friends can follow us in.
+    const sdk = getSDK()
+    safeCall(sdk?.game?.updateRoom?.bind(sdk.game), r0.roomId)
     r0.onLeave(() => {
+      if (room !== r0) return // we left on purpose (see watchIdentity)
       room = null
       live.battle = null
+      const now = getSDK()
+      safeCall(now?.game?.updateRoom?.bind(now.game), '')
       useGameStore.setState({ status: 'offline', battle: null })
-      reconnectTimer = setTimeout(connect, RECONNECT_MS)
+      // Closed under us: ask the matchmaker again (it may be a new server) and rejoin.
+      reconnectTimer = setTimeout(connect, 1000)
     })
     startMoveLoop()
     useGameStore.setState({ status: 'online', zone: 'lobby' })
     playMusic('lobby')
   } catch (err) {
     console.warn('[net] could not join', err)
-    useGameStore.setState({ status: 'error', error: String(err?.message || err) })
-    reconnectTimer = setTimeout(connect, RECONNECT_MS)
+    retryLater(err)
   } finally {
     connecting = false
   }
 }
 
-/** Logging in (or out) of Bloxity switches which save we play: rejoin. */
+/** Logging in (or out) of Bloxity switches which save we play: rejoin the same room. */
 export function watchIdentity() {
   return useBloxityStore.subscribe((s, prev) => {
     const now = s.user?._id || s.user?.id || null
@@ -384,10 +474,20 @@ export function watchIdentity() {
     if (now === before || now === joinedUserId) return
     if (room) {
       const r0 = room
+      const sameRoom = { roomId: r0.roomId, endpoint }
       room = null
-      r0.leave().finally(() => connect())
+      r0.leave().finally(() => connect(sameRoom))
     }
   })
+}
+
+/** Plays a Boxity emote on our character and shows it to the room. */
+export function playEmote(id) {
+  if (live.battle) return
+  const playing = startEmote(id)
+  if (!playing) return
+  live.player.boxityEmote = playing
+  send(C2S.emote, { id })
 }
 
 /** For the perf probe / debugging. */

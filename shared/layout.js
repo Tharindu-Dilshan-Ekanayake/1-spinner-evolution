@@ -11,12 +11,14 @@ import { CAPSULE_LIST, RING_LIST, WORLDS } from './content.js'
  *            ... Stage 3 gate
  *                Stage 2 gate      <- the stages run away in one straight line
  *                Stage 1 gate         (Grassland lives in the lobby itself)
- *   WINS SHOP        SPAWN        LEADERBOARDS
- *   (capsules)         |          (+ Halloween corner)
+ *   WORLDS portal
+ *   SPINNERS SHOP    SPAWN        LEADERBOARDS
+ *   (a pad per spinner)  |
  *                TRAIN POWER
- *              rings either side
+ *          the training rings in a row
+ *     (stone mountains all round the island)
  *
- * The other worlds (Lava, Galaxy, Halloween) are their own zones, entered through the
+ * The other worlds (Lava, Galaxy) are their own zones, entered through the
  * Worlds portal, and use exactly the same stage line in front of their spawn.
  */
 
@@ -29,12 +31,14 @@ export const GRAVITY = 26
  * Stage line (identical in every zone)
  *
  * Seen walking forward (-Z) from the spawn, stage k is:
- *   gate k        z = gateZ(k)     glass door: touch it to fight stage k
- *   blue pad      just past it     you stand here while your spinners fight
+ *   gate k        z = gateZ(k)     glass door into stage k's area: open once stage
+ *                                  k-1 is beaten (gate 1 is always open)
+ *   blue pad      just past it     stand on it to start the fight; you stay on it
  *   arena k       z = arenaZ(k)
  *   red pad       far side         the enemy trainer
  *   platform k    before gate k+1  the yellow Return pad (cash out, back to lobby)
- * Winning opens gate k behind you; losing puts you back in front of gate k.
+ * Walk around freely; only the blue pad starts a match. Winning opens the next gate;
+ * losing puts you beside the blue pad to try again.
  * ------------------------------------------------------------------------- */
 
 export const STAGE = {
@@ -75,20 +79,29 @@ export function returnPad(k) {
   return { x: -7, y: 0, z: gateZ(k) - 50 }
 }
 
-/** Standing in front of gate k, facing it. Losing stage k puts you here. */
+/** Standing in front of gate k, facing it (outside stage k's area). */
 export function gateFront(k) {
   return { x: 3, y: 0, z: gateZ(k) + 5, ry: Math.PI }
 }
+
+/** Beside stage k's blue pad, off it, facing the arena. Losing stage k puts you here. */
+export function retrySpot(k) {
+  return { x: 6, y: 0, z: gateZ(k) - 3, ry: Math.PI }
+}
+
+/** Gate k is open (walkable) once the run has beaten the stage before it. */
+export const gateOpen = (k, cleared) => cleared >= k - 1
 
 /** Gate k as a door (see Doors below). Its front faces the spawn (+Z). */
 export function stageDoor(k) {
   return { x: 0, z: gateZ(k), ry: 0, width: STAGE.gateWidth, height: STAGE.gateHeight }
 }
 
-/** True when `p` is pressed up against the front of gate k's glass. */
-export function nearGate(k, p, slack = 0) {
-  const dz = p.z - gateZ(k)
-  return dz > -0.5 - slack && dz < 3.5 + slack && Math.abs(p.x) < STAGE.gateWidth / 2 + slack
+/** True when `p` is standing on stage k's blue pad. */
+export function onPlayerPad(k, p, slack = 0) {
+  const pad = playerPad(k)
+  const half = STAGE.padSize / 2 + slack
+  return Math.abs(p.x - pad.x) <= half && Math.abs(p.z - pad.z) <= half
 }
 
 /** Far end of the stage line's island for a world of `n` stages. */
@@ -111,65 +124,105 @@ export function zoneOfWorld(worldId) {
 
 export const LOBBY = {
   spawn: STAGE.spawn,
-  /** Walkable island: x/z bounds of the top surface (y = 0). */
-  island: { minX: -80, maxX: 80, minZ: -36, maxZ: 118 },
+  /** Walkable island: x/z bounds of the top surface (y = 0). Kept compact on purpose. */
+  island: { minX: -56, maxX: 42, minZ: -34, maxZ: 48 },
   /** Ring dish radius; the wall around it is a little wider. */
-  ringRadius: 7.5,
+  ringRadius: 4.6,
 }
 
-/** Training rings: pairs either side of the path behind the spawn, best furthest back. */
+/**
+ * Training rings: one row across the back of the lobby, in rebirth order from the left
+ * as you walk back from the spawn. Each one's pad stands in front of it.
+ */
+export const TRAINING_ROW = { z: 36, spacing: 11.5, centreX: -7 }
 export const RING_POSITIONS = Object.fromEntries(
   RING_LIST.map((ring, i) => [
     ring.id,
-    { x: i % 2 === 0 ? -20 : 20, y: 0, z: 32 + Math.floor(i / 2) * 22 },
+    { x: TRAINING_ROW.centreX + ((RING_LIST.length - 1) / 2 - i) * TRAINING_ROW.spacing, y: 0, z: TRAINING_ROW.z },
   ]),
 )
 
-/** The Wins Shop, left of the spawn: two rows of capsule machines along a carpet. */
-const SHOP_ORDER = ['basic', 'common', 'rare', 'epic', 'exclusive', 'legendary', 'mythic', 'celestial', 'godly']
-export const CAPSULE_POSITIONS = Object.fromEntries(
-  SHOP_ORDER.map((id, i) => [id, { x: -30 - (i % 5) * 10, y: 0, z: i < 5 ? -9 : 9 }]),
-)
-CAPSULE_POSITIONS.halloween = { x: 38, y: 0, z: 42 }
+/**
+ * The training pad beside each ring, on the side facing the path: a low square step.
+ * Standing on it is what trains at that ring.
+ */
+export const TRAIN_PAD = { size: 3.4, top: 0.2 }
 
-export const CRYSTAL_POSITION = { x: -70, y: 0, z: 10 }
+export function trainPad(ringId) {
+  const c = RING_POSITIONS[ringId]
+  // In front of the ring, on the spawn's side.
+  return { x: c.x, y: TRAIN_PAD.top, z: c.z - (LOBBY.ringRadius + 3) }
+}
 
-/** The Worlds portal (Lava, Galaxy, Halloween), front-left of the spawn, beside the gate. */
-export const WORLDS_PORTAL = { x: -30, y: 0, z: -26, ry: 0, width: 8, height: 9 }
+/**
+ * The Spinners Shop, left of the spawn: two rows of tiers across your view, the
+ * cheaper row in front and the rest behind it with an aisle between, and the Crystal
+ * Spinner ending the back row.
+ */
+const SHOP_FRONT = ['basic', 'common', 'rare', 'epic', 'exclusive']
+const SHOP_BACK = ['legendary', 'mythic', 'celestial', 'godly']
+/** Row x (front, back) and the five slots along z, left to right as seen from the spawn. */
+export const SHOP_LAYOUT = { frontX: -24, backX: -40, slots: [15, 7.5, 0, -7.5, -15] }
+export const CAPSULE_POSITIONS = Object.fromEntries([
+  ...SHOP_FRONT.map((id, i) => [id, { x: SHOP_LAYOUT.frontX, y: 0, z: SHOP_LAYOUT.slots[i] }]),
+  ...SHOP_BACK.map((id, i) => [id, { x: SHOP_LAYOUT.backX, y: 0, z: SHOP_LAYOUT.slots[i] }]),
+])
+
+export const CRYSTAL_POSITION = { x: SHOP_LAYOUT.backX, y: 0, z: SHOP_LAYOUT.slots[4] }
+
+/**
+ * One pad per spinner for sale: each tier's four spinners stand on a 2x2 square of pads
+ * where the tier sits, cheapest at the front-left as you walk up from the spawn. Stand
+ * on a pad to buy the spinner spinning on it.
+ */
+export const SHOP_PAD = { radius: 1.6, spacing: 1.75, reach: 2.7 }
+export const SHOP_PADS = CAPSULE_LIST.flatMap((tier) => {
+  const c = CAPSULE_POSITIONS[tier.id]
+  if (!c) return []
+  // Facing the tier from the spawn: `front` points back at the spawn, `left` to its left.
+  const fx = Math.abs(c.x) >= Math.abs(c.z) ? -Math.sign(c.x) : 0
+  const fz = fx ? 0 : -Math.sign(c.z)
+  const left = { x: -fz, z: fx }
+  const s = SHOP_PAD.spacing
+  return tier.items.slice(0, 4).map((it, i) => {
+    const f = i < 2 ? s : -s
+    const l = i % 2 === 0 ? s : -s
+    return { id: it.spinner, tier: tier.id, x: c.x + fx * f + left.x * l, y: 0, z: c.z + fz * f + left.z * l }
+  })
+})
+
+/** The spinner whose shop pad you're standing at, or null. */
+export function shopPadNear(pos, reach = SHOP_PAD.reach) {
+  let best = null
+  let bestD = reach
+  for (const pad of SHOP_PADS) {
+    const d = dist2d(pos, pad)
+    if (d < bestD) {
+      bestD = d
+      best = pad.id
+    }
+  }
+  return best
+}
+
+/** The Worlds portal (Lava, Galaxy), front-left of the spawn, facing it. */
+export const WORLDS_PORTAL = { x: -24, y: 0, z: -24, ry: 0, width: 8, height: 9 }
 
 /** Leaderboards, right of the spawn, facing it. */
 export const LEADERBOARD_POSITIONS = [
-  { id: 'playtime', title: 'Most Playtime', x: 48, y: 0, z: -16, ry: -Math.PI / 2 },
-  { id: 'rebirths', title: 'Most Rebirths', x: 50, y: 0, z: 0, ry: -Math.PI / 2 },
-  { id: 'wins', title: 'Most Wins', x: 48, y: 0, z: 16, ry: -Math.PI / 2 },
+  { id: 'playtime', title: 'Most Playtime', x: 32, y: 0, z: -10, ry: -Math.PI / 2 },
+  { id: 'rebirths', title: 'Most Rebirths', x: 34, y: 0, z: 1, ry: -Math.PI / 2 },
+  { id: 'wins', title: 'Most Wins', x: 32, y: 0, z: 12, ry: -Math.PI / 2 },
 ]
 
-/** Named spots the HUD can warp to inside the lobby (Shop / Worlds / Event buttons). */
+/** Named spots the HUD can warp to inside the lobby (Shop / Worlds buttons). */
 export const LOBBY_SPOTS = {
   spawn: STAGE.spawn,
   stages: { x: 0, y: 0, z: gateZ(1) + 6, ry: Math.PI },
-  shop: { x: -20, y: 0, z: 0, ry: -Math.PI / 2 },
-  training: { x: 0, y: 0, z: 22, ry: 0 },
+  shop: { x: -14, y: 0, z: 0, ry: -Math.PI / 2 },
+  training: { x: 0, y: 0, z: 20, ry: 0 },
   worlds: { x: WORLDS_PORTAL.x, y: 0, z: WORLDS_PORTAL.z + 6, ry: Math.PI },
-  halloween: { x: 30, y: 0, z: 34, ry: Math.PI / 4 },
 }
-
-/** Collectible pumpkins (Halloween candy). Respawn per player. */
-export const PUMPKINS = [
-  { id: 'p1', x: -10, z: 8 },
-  { id: 'p2', x: 10, z: -12 },
-  { id: 'p3', x: -28, z: 22 },
-  { id: 'p4', x: -64, z: -22 },
-  { id: 'p5', x: 32, z: -6 },
-  { id: 'p6', x: -8, z: 64 },
-  { id: 'p7', x: 8, z: 110 },
-  { id: 'p8', x: 58, z: 54 },
-  { id: 'p9', x: 26, z: 52 },
-  { id: 'p10', x: -46, z: 30 },
-  { id: 'p11', x: 62, z: -28 },
-  { id: 'p12', x: -40, z: 100 },
-]
-export const PUMPKIN_RESPAWN_MS = 90 * 1000
 
 /* ---------------------------------------------------------------------------
  * Doors
@@ -219,14 +272,14 @@ export function dist2d(a, b) {
 }
 
 /**
- * Ring the player is training at, or null. Players can't step into the dish (its wall
- * blocks them), so "at" means standing against the wall; `slack` widens that for the
- * server, which only has the last reported position.
+ * Ring whose training pad the player is standing on, or null. `slack` widens the pad
+ * for the server, which only has the last reported position.
  */
 export function ringAt(pos, slack = 0) {
+  const half = TRAIN_PAD.size / 2 + slack
   for (const ring of RING_LIST) {
-    const c = RING_POSITIONS[ring.id]
-    if (dist2d(pos, c) <= LOBBY.ringRadius + 3 + slack) return ring.id
+    const pad = trainPad(ring.id)
+    if (Math.abs(pos.x - pad.x) <= half && Math.abs(pos.z - pad.z) <= half) return ring.id
   }
   return null
 }

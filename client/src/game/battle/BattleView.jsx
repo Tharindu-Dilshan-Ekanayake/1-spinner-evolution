@@ -7,11 +7,28 @@ import { ORDER, useSystem } from '../loop'
 import { overlay, popup } from '../overlay/worldOverlay'
 import { SPRITE, fxBatch, shadowBatch } from '../render/fxBatch'
 import { fx } from '../render/particles'
+import { auraBody, auraLevel, pushAura } from '../spinners/spinnerAura'
+import { FIRE, LIGHTNING, elementOf, pushElement } from '../spinners/spinnerElement'
 import { enemyPalette, spinnerBatch, spinnerPalette } from '../spinners/spinnerBatch'
 import { frameAlpha } from './battleState'
 
 /** Enemy spinner silhouette per world (bosses always get the big saw). */
-const ENEMY_FAMILY = { grassland: 'saw', lava: 'star', galaxy: 'blade', halloween: 'dome' }
+const ENEMY_FAMILY = { grassland: 'saw', lava: 'star', galaxy: 'blade' }
+/** The enemy trainers' element per world: fire in Grassland and Lava, lightning in the Galaxy. */
+const ENEMY_ELEMENT = { grassland: FIRE, lava: FIRE, galaxy: LIGHTNING }
+
+/** The element of a side in this fight: the enemy's world's, or the first of our units that has one. */
+function sideElement(b, side) {
+  if (side === 1) return ENEMY_ELEMENT[b.world] || 0
+  for (let i = 0; i < b.units.length; i += 1) {
+    const u = b.units[i]
+    if (u.side === 0 && u.alive) {
+      const e = elementOf(u.id)
+      if (e) return e
+    }
+  }
+  return 0
+}
 
 /**
  * Draws the active battle: interpolated spinners, HP labels with skulls/crowns,
@@ -49,10 +66,18 @@ export function BattleView() {
       const pal = enemy ? enemyPalette(b.world, u.boss) : spinnerPalette(u.id)
       const def = enemy ? null : SPINNERS[u.id]
       const tilt = 0.1 + Math.min(0.25, Math.hypot(u.tx - u.px, u.tz - u.pz) * 0.6)
-      spinnerBatch.push(family, x, 0.17, z, u.angle, tilt, u.angle * 0.13, u.r, pal, def?.glow ? 0.6 : u.boss ? 0.25 : 0, u.flash * 0.8, u.golden)
+      // Our spinners wear their aura into battle (rarer = brighter); enemies only a boss's glow.
+      const level = def ? auraLevel(def, u.golden) : 0
+      spinnerBatch.push(family, x, 0.17, z, u.angle, tilt, u.angle * 0.13, u.r, pal, def ? auraBody(level) : u.boss ? 0.25 : 0, u.flash * 0.8, u.golden)
       shadowBatch.push(x, 0.17, z, u.r * 2.2, 0, 0, 0.05, 0.4, SPRITE.glow, true)
-      if (q.glow && (def?.glow || u.boss)) {
-        fxBatch.push(x, 0.6, z, u.r * 3, pal.a.r, pal.a.g, pal.a.b, 0.45, SPRITE.glow)
+      if (q.glow) {
+        if (def) pushAura(x, 0.17, z, u.r * 1.3, pal, level, u.golden, now * 0.001, i * 1.7)
+        else if (u.boss) fxBatch.push(x, 0.6, z, u.r * 3, pal.a.r, pal.a.g, pal.a.b, 0.45, SPRITE.glow)
+      }
+      // Fire and lightning (a hit makes them flare): ours by their element, the enemy's by world.
+      if (u.alive && q.elements > 0) {
+        const kind = enemy ? ENEMY_ELEMENT[b.world] || 0 : elementOf(u.id)
+        if (kind) pushElement(kind, x, 0.17, z, u.r * 0.95, now * 0.001, i * 1.3, Math.min(1, 0.8 + u.flash * 0.4), q.elements)
       }
       // Speed ring while our team is boosted.
       if (!enemy && b.boost > 0.15) {
@@ -70,7 +95,10 @@ export function BattleView() {
       const z = b.cz + hq[h]
       const dmg = hq[h + 2]
       const side = hq[h + 3]
-      fx.hit(x, 0.6, z, dmg > b.maxTheirs * 0.15)
+      const big = dmg > b.maxTheirs * 0.15
+      fx.hit(x, 0.6, z, big)
+      const kind = sideElement(b, side)
+      if (kind) fx.hitElement(x, 0.6, z, kind, big)
       popup(x, 1.4, z, formatNumber(dmg), side === 0 ? 'dmg' : 'hurt')
       sfx.hit(side === 0 && b.boost > 0.5)
     }

@@ -1,4 +1,4 @@
-import '@fontsource/lilita-one/latin-400.css'
+import '@fontsource/fredoka-one/latin-400.css'
 
 // Startup milestones, read by scripts/perf-probe.mjs (cheap; harmless in production).
 performance.mark('app:js-start')

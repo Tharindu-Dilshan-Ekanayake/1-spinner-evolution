@@ -15,6 +15,7 @@ import { DOOR } from '@shared'
 import { sfx } from '../../../audio/sfx'
 import { ORDER, useSystem } from '../../loop'
 import { glowMaterial } from '../../render/materials'
+import { PALETTE } from '../../sceneStyle'
 import { doorBox, doorwayHeight } from './doorParts'
 import { InstancedSet } from './Instanced'
 import { getBlockMaterial } from './shared'
@@ -34,8 +35,12 @@ import { getBlockMaterial } from './shared'
  */
 
 const OPEN_SECONDS = 0.9
+/** Height of the board across the top of every door frame. */
+const LINTEL = 2.6
+/** The TRAIN POWER arch colours; stage lines pass their world's own (door.colors). */
+const ARCH_COLORS = { base: PALETTE.navy, band: PALETTE.white, body: PALETTE.blue, cap: PALETTE.gold, light: PALETTE.sky }
 const NEON = '#ffb21a'
-const PANEL = '#1d2350'
+const PANEL = PALETTE.navy
 
 const plane = new PlaneGeometry(1, 1)
 
@@ -96,14 +101,37 @@ function Frames({ doors }) {
       const w = d.width
       const h = d.height
       const pillarX = w / 2 + P / 2
-      bricks.push({ matrix: doorBox(d, -pillarX, (h + P) / 2, 0, P, h + P, D), color: '#7d8bd4' })
-      bricks.push({ matrix: doorBox(d, pillarX, (h + P) / 2, 0, P, h + P, D), color: '#7d8bd4' })
-      bricks.push({ matrix: doorBox(d, 0, h + P / 2, 0, w + P * 2, P, D), color: '#8e9be0' })
-      // Display backing: across the top of the opening, or a board hung inside it.
-      if (d.screen) panels.push({ matrix: doorBox(d, 0, h - d.screen / 2, 0, w, d.screen, 0.5) })
-      if (d.board) panels.push({ matrix: doorBox(d, 0, d.board.y, 0, d.board.w, d.board.h, 0.5) })
-      // Glowing inner edge all round the opening, like the original's neon trim.
+      const c = d.colors || ARCH_COLORS
+      // Built like the TRAIN POWER arch: striped pillars on plinths with cap blocks, and
+      // a navy board in a frame across the top with a light strip and a row of lights.
+      const top = h + LINTEL
+      const bands = Math.max(3, Math.round((top - 1) / 1.3))
+      const band = (top - 1) / bands
+      for (const x of [-pillarX, pillarX]) {
+        bricks.push({ matrix: doorBox(d, x, 0.45, 0, P + 0.8, 0.9, D + 0.8), color: c.base })
+        bricks.push({ matrix: doorBox(d, x, 0.97, 0, P + 0.4, 0.14, D + 0.4), color: c.band })
+        for (let i = 0; i < bands; i += 1) {
+          bricks.push({ matrix: doorBox(d, x, 1 + band * (i + 0.5), 0, P, band, D), color: i % 2 ? c.band : c.body })
+        }
+        // Collar 15 cm inside the cap's faces (closer flickers at a distance).
+        bricks.push({ matrix: doorBox(d, x, top + 0.12, 0, P + 0.1, 0.24, D + 0.1), color: c.base })
+        bricks.push({ matrix: doorBox(d, x, top + 1.0, 0, P + 0.4, P + 0.4, D + 0.4), color: c.cap })
+      }
+      // The lintel and its cap span the opening only, ending inside the pillars and
+      // their caps: running across the pillars, their faces lined up with the pillars'.
+      bricks.push({ matrix: doorBox(d, 0, h + LINTEL / 2, 0, w, LINTEL, D - 0.1), color: c.body })
+      bricks.push({ matrix: doorBox(d, 0, h + LINTEL / 2 + 0.1, 0, w - 0.4, LINTEL - 0.8, D + 0.2), color: c.base })
+      bricks.push({ matrix: doorBox(d, 0, h + 0.3, 0, w - 0.8, 0.22, D + 0.25), color: c.light })
+      bricks.push({ matrix: doorBox(d, 0, top + 0.15, 0, w, 0.3, D), color: c.cap })
+      for (let x = -w / 2 + 1, i = 0; x <= w / 2 - 1; x += 2, i += 1) {
+        bricks.push({ matrix: doorBox(d, x, top - 0.25, (D + 0.2) / 2 + 0.07, 0.3, 0.3, 0.16), color: i % 2 ? c.cap : PALETTE.white })
+      }
+      // Display backing: across the top of the opening, or a board hung inside it -
+      // between the neon bars (sharing their faces, it flickered against them).
       const t = 0.28
+      if (d.screen) panels.push({ matrix: doorBox(d, 0, h - (d.screen + t) / 2, 0, w - t * 2, d.screen - t, 0.5) })
+      // (A gate's board and its panel are drawn by GateBoards, which can roll them up.)
+      // Glowing inner edge all round the opening, like the original's neon trim.
       const color = d.kind === 'portal' ? d.color : NEON
       neon.push({ matrix: doorBox(d, -w / 2 + t / 2, h / 2, 0, t, h, D + 0.12), color })
       neon.push({ matrix: doorBox(d, w / 2 - t / 2, h / 2, 0, t, h, D + 0.12), color })

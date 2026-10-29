@@ -10,11 +10,9 @@ export function Signs({ signs }) {
   const q = useQuality()
   const atlas = useMemo(
     () =>
-      createSignAtlas(signs, {
-        atlasSize: q.textureSize >= 512 ? 1024 : 512,
-        density: q.textureSize >= 512 ? 44 : 24,
-      }),
-    [signs, q.textureSize],
+      // The packer lowers the density by itself if the signs don't fit.
+      createSignAtlas(signs, { atlasSize: q.signAtlas, density: q.signAtlas / 23 }),
+    [signs, q.signAtlas],
   )
   useEffect(() => () => atlas.dispose(), [atlas])
   return <primitive object={atlas.mesh} />

@@ -5,7 +5,7 @@ import { getAudio, onAudioReady } from './audio'
  * with one loop per mood. Notes are scheduled ~120 ms ahead on the AudioContext clock
  * so timing stays tight even when the main thread is busy.
  *
- * playMusic('lobby' | 'battle' | 'halloween' | 'lava' | 'galaxy') cross-fades.
+ * playMusic('lobby' | 'battle' | 'lava' | 'galaxy') cross-fades.
  */
 
 const NOTE = (n) => 440 * Math.pow(2, (n - 69) / 12)
@@ -75,22 +75,6 @@ const TRACKS = {
     snare: [8],
     hat: 4,
     bass: [0, 6, 8, 14],
-  },
-  halloween: {
-    bpm: 98,
-    chords: [
-      [50, 53, 57],
-      [46, 50, 53],
-      [43, 46, 50],
-      [45, 49, 52],
-    ],
-    arp: [0, 2, 1, 2, 0, 2, 1, 0, 2, 1, 2, 0, 1, 2, 1, 2],
-    arpOctave: 24,
-    lead: 'triangle',
-    kick: [0, 8],
-    snare: [12],
-    hat: 4,
-    bass: [0, 4, 8, 12],
   },
 }
 

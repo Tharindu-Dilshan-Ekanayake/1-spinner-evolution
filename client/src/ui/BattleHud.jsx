@@ -6,6 +6,10 @@ import { sfx } from '../audio/sfx'
 import { send } from '../net/connection'
 import { useGameStore } from '../store/gameStore'
 import { live } from '../store/live'
+import Icon from './kit/Icon'
+import { ChunkyButton } from './kit/parts'
+import StrokeText from './kit/StrokeText'
+import { GRADIENTS, u } from './kit/style'
 
 /** Samples the live battle 10x a second (the HUD doesn't need 60 updates). */
 function useBattleSample() {
@@ -35,18 +39,32 @@ function useBattleSample() {
   return s
 }
 
+const VICTORY = 'linear-gradient(180deg, #ffffff 0%, #ffffff 50%, #ffe36b 51%, #ffb21e 100%)'
+const DEFEAT = 'linear-gradient(180deg, #ffd0c8 0%, #ff6a55 50%, #d4142a 100%)'
+
 function Result({ result }) {
   const won = result.result === 'win'
   const reward = result.reward || {}
+  const title = won ? (result.finished ? 'WORLD CLEARED!' : 'VICTORY!') : result.result === 'timeout' ? "TIME'S UP!" : 'DEFEATED!'
   return (
-    <div className="anim-reveal absolute left-1/2 top-[26%] -translate-x-1/2 text-center">
-      <div className={`stroke text-5xl sm:text-7xl ${won ? 'text-yellow-300' : 'text-red-400'}`}>
-        {won ? (result.finished ? 'WORLD CLEARED!' : 'VICTORY!') : result.result === 'timeout' ? "TIME'S UP!" : 'Your army was defeated!'}
+    <div className="anim-reveal absolute left-1/2 top-[24%] flex -translate-x-1/2 flex-col items-center" style={{ gap: u(10) }}>
+      <div style={{ fontSize: u(140), transform: 'rotate(-3deg)' }}>
+        <StrokeText stroke={u(24)} gradient={won ? VICTORY : DEFEAT}>
+          {title}
+        </StrokeText>
       </div>
-      {won && reward.wins > 0 && <div className="stroke mt-1 text-4xl text-yellow-300">🏆 +{formatNumber(reward.wins)} Wins</div>}
-      {won && reward.candy > 0 && <div className="stroke mt-1 text-4xl text-orange-300">🍬 +{formatNumber(reward.candy)} Candy</div>}
-      {!won && result.run && (result.run.wins > 0 || result.run.candy > 0) && (
-        <div className="stroke mt-1 text-2xl">Your run's rewards were banked!</div>
+      {won && reward.wins > 0 && (
+        <div className="flex items-center" style={{ fontSize: u(64), gap: u(10) }}>
+          <Icon name="trophy" size={u(80)} />
+          <StrokeText stroke={u(12)} gradient={GRADIENTS.gold}>
+            +{formatNumber(reward.wins)} Wins
+          </StrokeText>
+        </div>
+      )}
+      {!won && (
+        <div style={{ fontSize: u(40) }}>
+          <StrokeText stroke={u(8)}>{result.run && result.run.wins > 0 ? "Your run's rewards were banked!" : 'Train more and try again!'}</StrokeText>
+        </div>
       )}
     </div>
   )
@@ -61,53 +79,66 @@ export default function BattleHud() {
   // Compare how much of each army is left, not raw HP (armies differ in size).
   const winning = s.mine / Math.max(1, s.maxMine) >= s.theirs / Math.max(1, s.maxTheirs)
   const counting = s.countdown > 0
+  const stage = WORLDS[battle.world].firstStage + battle.stage - 1
 
   return (
     <>
       {!result && (
-        <button
-          type="button"
-          className="gbtn g-red stroke pointer-events-auto absolute left-1/2 top-3 -translate-x-1/2 px-10 py-1 text-3xl"
-          onClick={() => {
-            sfx.click()
-            send(C2S.giveUp)
-          }}
+        <ChunkyButton
+          gradient={GRADIENTS.redButton}
+          onClick={() => send(C2S.giveUp)}
+          title="Give Up"
+          radius={18}
+          border={5}
+          className="absolute left-1/2 -translate-x-1/2"
+          style={{ top: u(18), height: u(76), padding: `0 ${u(56)}` }}
         >
-          Give Up
-        </button>
+          <span style={{ fontSize: u(44) }}>
+            <StrokeText stroke={u(9)}>Give Up</StrokeText>
+          </span>
+        </ChunkyButton>
       )}
 
-      <div className="stroke absolute left-3 top-3 text-lg sm:text-2xl">
-        {WORLDS[battle.world]?.name} — Stage {battle.world === 'halloween' ? battle.stage : WORLDS[battle.world].firstStage + battle.stage - 1}
+      {/* Under the Give Up button: the top-left corner belongs to the platform's logos. */}
+      <div className="absolute left-1/2 -translate-x-1/2" style={{ top: u(112), fontSize: u(38) }}>
+        <StrokeText stroke={u(8)}>
+          {WORLDS[battle.world]?.name} - Stage {stage}
+        </StrokeText>
       </div>
 
       {counting && !result && (
-        <div key={Math.ceil(s.countdown)} className="stroke anim-reveal absolute left-1/2 top-[30%] -translate-x-1/2 text-8xl text-yellow-300">
-          {Math.ceil(s.countdown)}
+        <div key={Math.ceil(s.countdown)} className="anim-reveal absolute left-1/2 top-[28%] -translate-x-1/2" style={{ fontSize: u(200) }}>
+          <StrokeText stroke={u(30)} gradient={GRADIENTS.gold}>
+            {Math.ceil(s.countdown)}
+          </StrokeText>
         </div>
       )}
 
       {result && <Result result={result} />}
 
       {!result && (
-        <div className="absolute bottom-3 left-1/2 w-[min(94vw,640px)] -translate-x-1/2">
-          <div className="stroke mb-2 text-center text-2xl sm:text-4xl">
-            {counting ? 'Get ready...' : 'Click 🖱️ to boost your spinners!'}
+        <div className="absolute left-1/2 flex -translate-x-1/2 flex-col items-center" style={{ bottom: u(22), width: `min(${u(960)}, 94vw)`, gap: u(10) }}>
+          <div className="text-center" style={{ fontSize: u(48) }}>
+            <StrokeText stroke={u(10)}>{counting ? 'Get ready...' : 'Click to boost your spinners!'}</StrokeText>
           </div>
           {s.boost > 0.02 && (
-            <div className="mx-auto mb-1 h-3 w-2/3 overflow-hidden rounded-full border-2 border-black/70 bg-black/40">
-              <div className="h-full bg-linear-to-r from-yellow-300 to-orange-500" style={{ width: `${s.boost * 100}%` }} />
+            <div className="relative overflow-hidden" style={{ width: '66%', height: u(24), border: `${u(4)} solid #111`, borderRadius: u(12), background: 'rgba(0,0,0,0.45)' }}>
+              <div className="h-full" style={{ width: `${s.boost * 100}%`, background: GRADIENTS.barFill }} />
             </div>
           )}
-          <div className="relative flex h-12 overflow-hidden rounded-lg border-4 border-black/80 sm:h-14">
-            <div className="bg-linear-to-b from-red-400 to-red-600 transition-[width] duration-200" style={{ width: `${100 - minePct}%` }} />
-            <div className="flex-1 bg-linear-to-b from-lime-300 to-green-500" />
-            <div className="absolute inset-0 flex items-center justify-between px-3">
-              <span className="stroke text-xl sm:text-3xl">{formatNumber(s.theirs)} HP</span>
-              <span className={`stroke text-xl sm:text-3xl ${winning ? 'text-yellow-200' : 'text-red-200'}`}>
+          <div
+            className="relative flex w-full overflow-hidden"
+            style={{ height: u(84), borderRadius: u(42), border: `${u(6)} solid #0b2a6b`, boxShadow: `0 ${u(5)} 0 #0b2a6b`, background: '#eef6ff' }}
+          >
+            <div className="transition-[width] duration-200" style={{ width: `${100 - minePct}%`, background: GRADIENTS.redButton }} />
+            <div className="flex-1" style={{ background: GRADIENTS.greenButton }} />
+            <div className="absolute" style={{ left: u(18), right: u(18), top: u(6), height: u(14), borderRadius: u(8), background: 'rgba(255,255,255,0.35)' }} />
+            <div className="absolute inset-0 flex items-center justify-between" style={{ padding: `0 ${u(30)}`, fontSize: u(40) }}>
+              <StrokeText stroke={u(9)}>{formatNumber(s.theirs)} HP</StrokeText>
+              <StrokeText stroke={u(9)} gradient={winning ? GRADIENTS.gold : GRADIENTS.priceShort}>
                 {winning ? "YOU'RE WINNING!" : "YOU'RE LOSING!"}
-              </span>
-              <span className="stroke text-xl sm:text-3xl">{formatNumber(s.mine)} HP</span>
+              </StrokeText>
+              <StrokeText stroke={u(9)}>{formatNumber(s.mine)} HP</StrokeText>
             </div>
           </div>
         </div>

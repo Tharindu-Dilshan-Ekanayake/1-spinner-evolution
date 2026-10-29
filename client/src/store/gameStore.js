@@ -13,6 +13,8 @@ export const useGameStore = create((set, get) => ({
   error: null,
   /** True once the loading screen has lifted (the HUD mounts then). */
   playable: false,
+  /** A Boxity ad break is running: the game is paused and silent (bloxity/platform.js). */
+  adBreak: false,
   /** A moment after that: secondary scenery (labels, leaderboards) builds now. */
   settled: false,
 
@@ -21,15 +23,15 @@ export const useGameStore = create((set, get) => ({
   giftsAt: 0,
   quest: null,
   daily: null,
-  /** Current stage run: { world, cleared, wins, candy } or null. */
+  /** Current stage run: { world, cleared, wins } or null. */
   run: null,
   zone: 'lobby',
   leaderboards: null,
 
-  /** Open side panel: null | 'spinners' | 'rebirth' | 'trails' | 'auras' | 'shop' | 'worlds' | 'settings' | 'gifts' | 'event' */
+  /** Open side panel: null | 'spinners' | 'rebirth' | 'trails' | 'auras' | 'shop' | 'worlds' | 'settings' | 'gifts' */
   panel: null,
   /** What the player is standing next to (updated by the trigger poller, ~10 Hz). */
-  nearby: { capsule: null, ring: null, crystal: false, portal: null, pad: null, returnPad: false },
+  nearby: { shopPad: null, ring: null, padHint: null, crystal: false, portal: null, pad: null, returnPad: false, onStages: true },
 
   /** Battle HUD: { world, stage, line, units, mine, theirs, maxMine, maxTheirs, endAt } */
   battle: null,
@@ -38,6 +40,8 @@ export const useGameStore = create((set, get) => ({
   toasts: [],
   /** Queue of reward popups ("+7 WINS! KEEP GOING!") */
   rewards: [],
+  /** Wins still flying to the counter (see WinsFlight); the counter shows wins minus these. */
+  winsInFlight: 0,
   levelUp: null,
   /** Capsule opening animation: { capsule, results } */
   opening: null,
@@ -73,7 +77,6 @@ export const useGameStore = create((set, get) => ({
         level: stats.level,
         power: stats.power,
         wins: stats.wins,
-        candy: stats.candy,
         rebirths: stats.rebirths,
         stats: { ...p.stats, playtime: stats.playtime },
         gifts: { ...p.gifts, seconds: stats.giftSeconds },

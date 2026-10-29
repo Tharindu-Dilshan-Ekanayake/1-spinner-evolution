@@ -104,13 +104,17 @@ const vertexShader = /* glsl */ `
     vec2 off = vec2(mod(cell, 2.0) * 0.5, 0.5 - floor(cell / 2.0) * 0.5);
     vUv = off + uv * 0.5;
     vCol = iCol;
+    // Stretch along the quad's own long axis, then rotate: a stretched quad can point any way
+    // (a bolt of lightning is one such quad per segment).
     float c = cos(iExt.z);
     float s = sin(iExt.z);
-    vec2 q = vec2(c * position.x - s * position.y, s * position.x + c * position.y);
-    q.y *= iExt.w;
+    vec2 st = vec2(position.x, position.y * iExt.w);
+    vec2 q = vec2(c * st.x - s * st.y, s * st.x + c * st.y);
     vec4 mvPosition;
     if (iExt.y > 0.5) {
-      vec3 p = iPos.xyz + vec3(q.x * iPos.w, 0.0, q.y * iPos.w);
+      // -y -> +z keeps the quad's front face pointing up; (x, 0, y) would face down
+      // and be back-face culled from every camera above the ground.
+      vec3 p = iPos.xyz + vec3(q.x * iPos.w, 0.0, -q.y * iPos.w);
       mvPosition = viewMatrix * vec4(p, 1.0);
     } else {
       mvPosition = viewMatrix * vec4(iPos.xyz, 1.0);
@@ -219,7 +223,8 @@ class QuadBatch {
 const atlas = makeAtlas()
 
 export const fxBatch = new QuadBatch(1400, AdditiveBlending, atlas)
-export const shadowBatch = new QuadBatch(600, NormalBlending, atlas)
+// (Also holds the solid bodies of fire and lightning, see spinners/spinnerElement.js.)
+export const shadowBatch = new QuadBatch(1600, NormalBlending, atlas)
 // Blobs render before the additive effects so glows sit on top of them.
 shadowBatch.mesh.renderOrder = 1
 fxBatch.mesh.renderOrder = 2

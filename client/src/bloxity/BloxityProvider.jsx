@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 
 import { BloxityContext } from './BloxityContext'
+import { startPlatform } from './platform'
 import { getSDK, safeCall, toUnsubscribe, waitForSDK } from './sdk'
 import { DEFAULT_PROPORTIONS, useBloxityStore } from './store'
 
@@ -34,23 +35,17 @@ function isResetSentinel(equipped) {
 }
 
 /**
- * Bloxity's real endpoints.
- *
- * These MUST be passed explicitly. If `init()` receives neither `apiUrl` nor
- * `portalUrl`, the SDK checks whether it is running on localhost/127.0.0.1 and, if
- * so, silently repoints BOTH at `window.location.origin` - i.e. at the Vite dev
- * server. `showAuthPopup()` then opens `http://localhost:5173/auth?popup=1`, Vite's
- * SPA fallback serves the game again inside the popup, no token is ever posted back,
- * and login can never succeed. That fallback is meant for people running the whole
- * Bloxity portal locally; for game development it has to be overridden.
+ * Only the slug goes to `init()`: which environment (prod, stage or local) and its
+ * URLs come from the platform - window.BLOXITY_ENV in pages Boxity serves, the portal
+ * handshake when embedded, prod when nothing was told. The Vite dev server tells the
+ * page it is local (see vite.config.js); see bloxity/environment.js.
  */
-const PORTAL_URL = import.meta.env.VITE_BLOXITY_PORTAL_URL || 'https://bloxity.io'
-const API_URL = import.meta.env.VITE_BLOXITY_API_URL || 'https://api.bloxity.io'
-
 function initOnce(gameSlug, signal) {
   if (!initPromise) {
     initPromise = waitForSDK({ signal }).then((sdk) => {
-      sdk.init({ gameSlug, apiUrl: API_URL, portalUrl: PORTAL_URL })
+      sdk.init({ gameSlug })
+      // Ads, leaderboards, emotes, chat, settings: wired once, for the page's life.
+      startPlatform(sdk)
       return sdk
     })
     // A failed init shouldn't poison every later attempt (e.g. HMR reload).

@@ -6,6 +6,7 @@ import compression from 'compression'
 import cors from 'cors'
 import express from 'express'
 
+import { BLOXITY, verifyPlayer } from './bloxity.js'
 import { getLeaderboards } from './game/leaderboard.js'
 
 // Vite's dev server origin. Add the production origin here (or via CLIENT_ORIGIN)
@@ -36,7 +37,8 @@ export function registerHttpRoutes(app) {
   )
   app.use(express.json())
 
-  app.get('/api/health', (_req, res) => {
+  // Boxity hosting checks /health; keep it instant.
+  app.get(['/health', '/api/health'], (_req, res) => {
     res.json({ ok: true })
   })
 
@@ -45,30 +47,13 @@ export function registerHttpRoutes(app) {
   })
 
   /**
-   * Auth passthrough for the Bloxity SDK.
-   *
-   * The frontend will POST `{ token, user }` here from
-   * `Legion.SDK.auth.authenticateWithServer('/api/legion-auth')`.
-   *
-   * NOTE: not wired up on the frontend yet. The game currently keys saves by the
-   * Bloxity user id the client reports when joining the room (WorldRoom.onJoin).
-   * When you wire this, call `authenticateWithServer` from
-   * `client/src/bloxity/BloxityProvider.jsx` inside the `onUserChanged` handler, right
-   * after a non-null user arrives, and pass the returned accessToken to the room join.
+   * `Legion.SDK.auth.authenticateWithServer('/api/legion-auth')` target. The game
+   * itself doesn't need it (the room checks the token on join, WorldRoom.onAuth); it
+   * answers with the identity Boxity vouches for, never the user in the body.
    */
-  app.post('/api/legion-auth', (req, res) => {
-    console.log('[legion-auth] payload:', JSON.stringify(req.body, null, 2))
-
-    // TODO: verify the Bloxity JWT here before trusting req.body.user.
-    // Until that happens `req.body.user` is attacker-controlled — anyone can POST any
-    // legionId they like. Verify `req.body.token` against Bloxity's public key /
-    // introspection endpoint and derive the user from the *verified* claims, not from
-    // the body.
-
-    res.json({
-      accessToken: 'stub',
-      user: { legionId: req.body.user?._id },
-    })
+  app.post('/api/legion-auth', async (req, res) => {
+    const who = await verifyPlayer(String(req.body?.token || ''), BLOXITY.gameSlug || String(req.body?.gameSlug || ''))
+    res.json(who ? { valid: true, userId: who.userId } : { valid: false })
   })
 
   /**
@@ -78,10 +63,9 @@ export function registerHttpRoutes(app) {
    * (This game sells nothing for Bux; kept so the platform's webhook stays valid.)
    */
   app.post('/api/legion-webhook', (req, res) => {
-    console.log('[legion-webhook] payload:', JSON.stringify(req.body, null, 2))
-
-    // TODO: verify x-legion-webhook-secret header, dedupe by transactionId, grant the item.
-
+    // Nothing is sold, so there is never anything to grant; answer 2xx so Boxity
+    // doesn't treat the endpoint as broken.
+    console.log('[legion-webhook] ignored (no Gems products):', req.body?.sku, req.body?.transactionId)
     res.sendStatus(200)
   })
 

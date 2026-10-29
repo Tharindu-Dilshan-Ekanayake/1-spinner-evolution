@@ -2,13 +2,14 @@ import { useProgress } from '@react-three/drei'
 import { useEffect, useState } from 'react'
 
 import { useGameStore } from '../store/gameStore'
+import { iconUrl } from './kit/icons'
+import StrokeText from './kit/StrokeText'
 
 const TIPS = [
   'Stand next to a training ring and click to gain power!',
   'Every 5 levels you can equip another spinner.',
   'Rebirth to multiply all the power you train!',
   'Collect 5 of the same spinner to craft a Golden one.',
-  'Grab pumpkins around the lobby for Halloween candy!',
   'The yellow pad cashes out your stage run.',
 ]
 
@@ -37,20 +38,43 @@ export default function LoadingScreen({ sceneReady }) {
   const pct = Math.round(Math.max(progress * 0.6 + steps.reduce((a, b) => a + b, 0) * 13.3, 4))
   const label = !sceneReady ? 'Building the world…' : status !== 'online' ? (status === 'error' ? 'Server offline — retrying…' : 'Connecting to server…') : 'Loading your spinners…'
 
+  const shown = Math.min(100, pct)
+
   return (
-    <div className={`absolute inset-0 z-50 flex flex-col items-center justify-center bg-linear-to-b from-sky-400 to-blue-700 transition-opacity duration-500 ${done ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
-      <div className="anim-bob text-8xl drop-shadow-[0_8px_0_rgba(0,0,0,0.3)]">🌀</div>
-      <h1 className="stroke mt-2 text-center text-5xl sm:text-7xl">
-        <span className="text-yellow-300">+1</span> SPINNER
-        <br />
-        EVOLUTION
-      </h1>
-      <div className="mt-8 h-7 w-[min(80vw,420px)] overflow-hidden rounded-full border-4 border-black/70 bg-black/30">
-        <div className="h-full bg-linear-to-b from-yellow-300 to-orange-500 transition-[width] duration-300" style={{ width: `${Math.min(100, pct)}%` }} />
+    <div
+      className={`pp-font absolute inset-0 z-50 flex flex-col items-center justify-center gap-6 transition-opacity duration-500 ${done ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
+      style={{ background: 'linear-gradient(180deg, #2f8ff2 0%, #6fc0fb 55%, #c6ec86 55.2%, #a9dd6a 100%)' }}
+    >
+      <div className="pp-loading-disc" aria-hidden="true">
+        <img src={iconUrl('spinner')} alt="" width="150" height="150" draggable={false} />
       </div>
-      <div className="stroke mt-2 text-xl">{label}</div>
-      {status === 'error' && error && <div className="stroke-sm mt-1 max-w-sm text-center text-sm text-red-200">{error}</div>}
-      <div className="stroke-sm absolute bottom-6 max-w-md px-4 text-center text-lg text-white/90">💡 {tip}</div>
+      {/* Own compositor layer: progress updates below never repaint this big title. */}
+      <h1 className="m-0 text-center leading-none" style={{ fontSize: 'clamp(40px, 9vw, 96px)', transform: 'rotate(-3deg)', willChange: 'transform' }}>
+        <StrokeText stroke="0.16em" gradient="linear-gradient(180deg, #ffffff 0%, #ffffff 55%, #ffe36b 56%, #ffb21e 100%)">
+          +1 SPINNER EVOLUTION
+        </StrokeText>
+      </h1>
+      <div className="w-[min(560px,80vw)]">
+        <div className="relative h-9 overflow-hidden rounded-xl border-4 border-black bg-black/40">
+          {/* scaleX, not width: the fill animates on the compositor, with no layout per frame. */}
+          <div
+            className="h-full origin-left rounded-md transition-transform duration-300"
+            style={{ transform: `scaleX(${shown / 100})`, willChange: 'transform', background: 'linear-gradient(180deg, #fff27a 0%, #ffc61e 50%, #ff9a12 100%)' }}
+          />
+          <div className="absolute inset-0 flex items-center justify-center text-lg">
+            <StrokeText stroke={5}>{done ? 'READY!' : `LOADING ${shown}%`}</StrokeText>
+          </div>
+        </div>
+        <p className="mt-3 text-center text-lg">
+          <StrokeText stroke={5}>{label}</StrokeText>
+        </p>
+        {status === 'error' && error && <div className="stroke-sm mt-1 text-center text-sm text-red-200">{error}</div>}
+        <p className="mt-2 text-center text-base md:text-lg">
+          <StrokeText stroke={4} className="whitespace-normal">
+            {tip}
+          </StrokeText>
+        </p>
+      </div>
       {/* Rasterise the emoji used in battle now, so the first hit doesn't stutter. */}
       <div aria-hidden className="pointer-events-none absolute left-0 top-0 opacity-0">💀👑💥⭐🏆🍬✨🎁🔒</div>
     </div>

@@ -36,6 +36,30 @@ export function setVolume(kind, value) {
   if (kind === 'music' && musicBus) musicBus.gain.value = value * 0.5
 }
 
+let beforeMute = null
+
+export const isMuted = () => audioSettings.sfx === 0 && audioSettings.music === 0
+
+/** The HUD's sound button: silences everything, then restores the previous volumes. */
+export function toggleMute() {
+  if (isMuted()) {
+    setVolume('sfx', beforeMute?.sfx || 0.8)
+    setVolume('music', beforeMute?.music || 0.45)
+  } else {
+    beforeMute = { sfx: audioSettings.sfx, music: audioSettings.music }
+    setVolume('sfx', 0)
+    setVolume('music', 0)
+  }
+  return isMuted()
+}
+
+/** Ad breaks: everything goes quiet until the break ends (volumes are left alone). */
+export function setAudioPaused(paused) {
+  if (!ctx) return
+  if (paused) ctx.suspend().catch(() => {})
+  else ctx.resume().catch(() => {})
+}
+
 export function getAudio() {
   return ctx ? { ctx, sfx: sfxBus, music: musicBus, noise: noiseBuffer } : null
 }

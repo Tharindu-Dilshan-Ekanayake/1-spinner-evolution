@@ -3,18 +3,19 @@ import { AURA_LIST, C2S, formatNumber } from '@shared'
 import { useGameStore } from '../../store/gameStore'
 import { act } from '../actions'
 import { Panel } from '../common'
+import ShopTabs from './ShopTabs'
 
 export default function AurasPanel() {
   const profile = useGameStore((s) => s.profile)
   const close = useGameStore((s) => s.closePanel)
   return (
-    <Panel title="AURAS" icon="⭐" color="g-blue" onClose={close}>
+    <Panel title="AURAS" icon="auraAvatar" wide onClose={close}>
+      <ShopTabs />
       <div className="flex flex-col gap-2">
         {AURA_LIST.map((a) => {
           const owned = profile.auras.includes(a.id)
           const equipped = profile.aura === a.id
           const locked = profile.rebirths < a.rebirths
-          const balance = a.currency === 'candy' ? profile.candy : profile.wins
           return (
             <div key={a.id} className="flex items-center gap-3 rounded-xl border-4 border-black/60 bg-white/10 p-2">
               <div
@@ -27,7 +28,6 @@ export default function AurasPanel() {
                   🏆 x{a.wins} wins
                   {a.dmg > 1 && ` • 💥 +${Math.round((a.dmg - 1) * 100)}%`}
                   {a.hp > 1 && ` • ❤️ +${Math.round((a.hp - 1) * 100)}%`}
-                  {a.candy > 1 && ` • 🍬 x${a.candy}`}
                 </div>
               </div>
               {owned ? (
@@ -35,8 +35,8 @@ export default function AurasPanel() {
                   {equipped ? 'Unequip' : 'Equip'}
                 </button>
               ) : (
-                <button type="button" disabled={locked || balance < a.cost} className={`gbtn ${a.currency === 'candy' ? 'g-orange' : 'g-yellow'} stroke w-28 py-2 text-lg`} onClick={() => act(C2S.buyAura, { id: a.id })}>
-                  {locked ? `🔒 R${a.rebirths}` : `${a.currency === 'candy' ? '🍬' : '🏆'} ${formatNumber(a.cost)}`}
+                <button type="button" disabled={locked || profile.wins < a.cost} className="gbtn g-yellow stroke w-28 py-2 text-lg" onClick={() => act(C2S.buyAura, { id: a.id })}>
+                  {locked ? `🔒 R${a.rebirths}` : `🏆 ${formatNumber(a.cost)}`}
                 </button>
               )}
             </div>

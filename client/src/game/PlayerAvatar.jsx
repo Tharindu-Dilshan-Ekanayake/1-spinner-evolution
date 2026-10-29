@@ -1,18 +1,17 @@
-import { useGLTF } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { forwardRef, useEffect, useMemo, useRef, useState } from 'react'
-import { Box3, MeshLambertMaterial, Vector3 } from 'three'
+import { forwardRef, use, useEffect, useMemo, useRef, useState } from 'react'
+import { Box3, DataTexture, MeshLambertMaterial, SRGBColorSpace, Vector3 } from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 
 import {
   assetUrls,
-  BASE_BODY_URL,
   isRealId,
   PART_SLOTS,
   skinCompositeUrl,
   skinIdOrDefault,
 } from '../bloxity/avatarAssets'
-import { loadOBJ, loadPartGLB, loadTexture } from '../bloxity/avatarLoader'
+import { loadBaseBody, loadOBJ, loadPartGLB, loadTexture } from '../bloxity/avatarLoader'
+import { applyEmote } from '../bloxity/emotes'
 import { useBloxity } from '../bloxity/BloxityContext'
 import { DEFAULT_PROPORTIONS } from '../bloxity/store'
 import {
@@ -22,6 +21,7 @@ import {
   applySkin,
   attachAccessory,
   collectRig,
+  gameProportions,
 } from './avatarRig'
 
 /**
@@ -33,6 +33,16 @@ function fallbackMotion(delta) {
   _idleMotion.time += delta
   return _idleMotion
 }
+
+/**
+ * A 1x1 white skin every avatar starts with. The material is compiled with a map from
+ * the start, so swapping in the real skin later is a texture change, not a fresh shader
+ * compile (that compile stalled the first second of play).
+ */
+const BLANK_SKIN = new DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1)
+BLANK_SKIN.colorSpace = SRGBColorSpace
+BLANK_SKIN.flipY = false
+BLANK_SKIN.needsUpdate = true
 
 /** Stand-in for the Bloxity loading helpers when assembling someone else's avatar. */
 const QUIET_GAME = { loadingStep() {}, loadingEnd() {}, updateRoom() {} }
@@ -67,8 +77,8 @@ export const PlayerAvatar = forwardRef(function PlayerAvatar(
   const proportions = remote ? remote.proportions || DEFAULT_PROPORTIONS : local.proportions
   // Only our own avatar reports to the Bloxity loading screen.
   const game = remote ? QUIET_GAME : local.game
-  // player.glb uses no Draco/Meshopt compression: skip setting up those decoders.
-  const { scene: baseScene } = useGLTF(BASE_BODY_URL, false, false)
+  // Suspends until player.glb is in (shared by every avatar).
+  const { scene: baseScene } = use(loadBaseBody())
   const [assembled, setAssembled] = useState(false)
 
   // The GLTF cache hands back one shared scene. Clone via SkeletonUtils so this
@@ -84,7 +94,7 @@ export const PlayerAvatar = forwardRef(function PlayerAvatar(
     // Lambert: the same fully matte look as a rough, non-metal standard material,
     // for a fraction of the shader cost.
     for (const mesh of collected.skinnedMeshes) {
-      mesh.material = new MeshLambertMaterial({ color: 0xffffff })
+      mesh.material = new MeshLambertMaterial({ color: 0xffffff, map: BLANK_SKIN })
     }
 
     if (!collected.skeleton) {
@@ -145,6 +155,9 @@ export const PlayerAvatar = forwardRef(function PlayerAvatar(
     // Accessories.
     for (const [kind, idKey, meshUrl, texUrl] of [
       ['hat', 'hatId', assetUrls.hatMesh, assetUrls.hatTexture],
+      // Hair and masks are worn with a hat, and load exactly like one.
+      ['hair', 'hairId', assetUrls.hatMesh, assetUrls.hatTexture],
+      ['mask', 'maskId', assetUrls.hatMesh, assetUrls.hatTexture],
       ['back', 'backId', assetUrls.backMesh, assetUrls.backTexture],
     ]) {
       const id = equipped?.[idKey]
@@ -203,15 +216,20 @@ export const PlayerAvatar = forwardRef(function PlayerAvatar(
   // Applied per frame rather than in an effect: every bone is reset to its rest pose
   // and re-scaled each pass, which keeps it idempotent and survives anything else
   // that touches the skeleton.
-  const proportionsRef = useRef(proportions)
-  proportionsRef.current = proportions
+  // The player's own proportions, with this game's body shape on top.
+  const body = useMemo(() => gameProportions(proportions), [proportions])
+  const bodyRef = useRef(body)
+  bodyRef.current = body
 
   useFrame((_state, delta) => {
     try {
       // Order matters: proportions reset every bone to its rest pose, and the
       // animation then rotates on top of that clean base.
-      applyProportions(rig, proportionsRef.current)
-      animateRig(rig, motionRef?.current ?? fallbackMotion(delta))
+      applyProportions(rig, bodyRef.current)
+      const motion = motionRef?.current ?? fallbackMotion(delta)
+      animateRig(rig, motion)
+      // A Boxity emote plays over the pose (see bloxity/emotes.js).
+      if (motion.boxity) applyEmote(rig, motion.boxity, motion.time)
     } catch {
       // A malformed payload must not kill the render loop.
     }
@@ -239,6 +257,7 @@ export const PlayerAvatar = forwardRef(function PlayerAvatar(
   )
 })
 
-useGLTF.preload(BASE_BODY_URL, false, false)
+// Start downloading the body as soon as this module loads.
+loadBaseBody()
 
 export default PlayerAvatar

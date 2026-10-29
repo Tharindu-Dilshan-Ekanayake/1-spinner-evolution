@@ -8,7 +8,6 @@ const ART = {
   grassland: { icon: '🌳', color: 'from-green-500/80' },
   lava: { icon: '🌋', color: 'from-orange-600/80' },
   galaxy: { icon: '🌌', color: 'from-purple-700/80' },
-  halloween: { icon: '🎃', color: 'from-orange-500/80' },
 }
 
 export default function WorldsPanel() {
@@ -22,7 +21,7 @@ export default function WorldsPanel() {
   }
 
   return (
-    <Panel title="Worlds" icon="🌍" color="g-blue" onClose={close}>
+    <Panel title="Worlds" icon="portalSwirl" onClose={close}>
       <div className="flex flex-col gap-2">
         {zone !== 'lobby' && (
           <button type="button" className="gbtn g-green stroke py-2 text-2xl" onClick={() => travel('lobby')}>
@@ -32,7 +31,7 @@ export default function WorldsPanel() {
         {WORLD_LIST.map((w) => {
           const open = worldUnlocked(w.id, profile)
           const best = profile.best?.[w.id] || 0
-          const range = w.event ? `${w.stageCount} spooky stages` : `Stages ${w.firstStage}-${w.firstStage + w.stageCount - 1}`
+          const range = `Stages ${w.firstStage}-${w.firstStage + w.stageCount - 1}`
           const req = []
           if (w.rebirths) req.push(`Rebirth ${w.rebirths}`)
           if (w.requiresStage) req.push(`Clear Stage ${w.requiresStage}`)
@@ -43,7 +42,7 @@ export default function WorldsPanel() {
                 <div className="stroke text-2xl">{w.name}</div>
                 <div className="stroke-sm text-sm">
                   {range}
-                  {best > 0 && ` • Best: ${w.event ? `Stage ${best}` : `Stage ${best}`}`}
+                  {best > 0 && ` • Best: Stage ${best}`}
                 </div>
                 {!open && <div className="stroke-sm text-sm text-red-300">🔒 {req.join(' + ')}</div>}
               </div>
@@ -59,7 +58,7 @@ export default function WorldsPanel() {
               💥 Training
             </button>
             <button type="button" className="gbtn g-red stroke py-1 text-lg" onClick={() => travel('lobby', 'shop')}>
-              🛒 Wins Shop
+              🛒 Spinners Shop
             </button>
           </div>
         )}

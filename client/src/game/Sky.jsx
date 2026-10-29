@@ -236,21 +236,7 @@ function Stars() {
   )
 }
 
-function Moon() {
-  const ref = useRef(null)
-  const camera = useThree((s) => s.camera)
-  useFrame(() => {
-    if (ref.current) ref.current.position.set(camera.position.x - 160, camera.position.y + 170, camera.position.z - 260)
-  })
-  return (
-    <mesh ref={ref} renderOrder={-1}>
-      <sphereGeometry args={[22, 16, 12]} />
-      <meshBasicMaterial color="#fff4c9" fog={false} />
-    </mesh>
-  )
-}
-
-/** Gradient sky plus whatever the zone's theme adds (clouds, stars, moon). */
+/** Gradient sky plus whatever the zone's theme adds (clouds, stars). */
 export function Sky({ theme }) {
   const q = useQuality()
   return (
@@ -258,7 +244,6 @@ export function Sky({ theme }) {
       <SkyDome sky={theme.sky} />
       {theme.clouds && q.clouds > 0 && <Clouds count={q.clouds} />}
       {theme.stars && <Stars />}
-      {theme.moon && <Moon />}
     </>
   )
 }

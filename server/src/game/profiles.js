@@ -1,4 +1,4 @@
-import { LIMITS, MAX_LEVEL, levelNeed, slotsFor, spinnerScore } from '../../../shared/index.js'
+import { AURAS, LIMITS, MAX_LEVEL, SPINNERS, levelNeed, slotsFor, spinnerScore } from '../../../shared/index.js'
 
 /**
  * The persisted save of one player, and the few operations every other module needs
@@ -18,13 +18,14 @@ export function createProfile(key, name) {
     level: 1,
     power: 0,
     wins: 0,
-    candy: 0,
     rebirths: 0,
     nextUid: 2,
     // Everyone starts with one spinner, like the original; Level 2 brings the next.
     inventory: [{ uid: 1, id: 'rookie', golden: false, locked: true }],
     equipped: [1],
     index: { rookie: true },
+    // First-time tutorial: train, beat Stage 1, bring the wins back on the Return pad.
+    tutorialDone: false,
   })
 }
 
@@ -34,25 +35,26 @@ export function migrateProfile(p) {
   p.level = Math.max(1, Math.min(MAX_LEVEL, p.level || 1))
   p.power = p.power || 0
   p.wins = p.wins || 0
-  p.candy = p.candy || 0
   p.rebirths = p.rebirths || 0
   p.nextUid = p.nextUid || 1
-  p.inventory = Array.isArray(p.inventory) ? p.inventory : []
+  // Spinners no longer in the game (the Halloween ones) leave the save.
+  const saved = Array.isArray(p.inventory) ? p.inventory : []
+  p.inventory = saved.filter((s) => SPINNERS[s.id])
+  const removed = saved.length - p.inventory.length
   p.equipped = Array.isArray(p.equipped) ? p.equipped : []
   p.trails = Array.isArray(p.trails) ? p.trails : []
   p.trail = p.trail || ''
-  p.auras = Array.isArray(p.auras) ? p.auras : []
-  p.aura = p.aura || ''
+  p.auras = (Array.isArray(p.auras) ? p.auras : []).filter((id) => AURAS[id])
+  p.aura = p.auras.includes(p.aura) ? p.aura : ''
   p.potions = { power: 0, wins: 0, lucky: 0, ...(p.potions || {}) }
   p.activePotions = { power: 0, wins: 0, lucky: 0, ...(p.activePotions || {}) }
-  p.best = { grassland: 0, lava: 0, galaxy: 0, halloween: 0, ...(p.best || {}) }
+  p.best = { grassland: 0, lava: 0, galaxy: 0, ...(p.best || {}) }
   p.quest = p.quest || 0
   p.stats = {
     playtime: 0,
     totalWins: 0,
     totalPower: 0,
     capsules: 0,
-    candy: 0,
     golden: 0,
     battlesWon: 0,
     battlesLost: 0,
@@ -62,10 +64,23 @@ export function migrateProfile(p) {
   p.index = p.index || {}
   p.daily = { day: '', streak: 0, ...(p.daily || {}) }
   p.gifts = { day: '', seconds: 0, claimed: [], ...(p.gifts || {}) }
-  p.pumpkins = p.pumpkins || {}
   p.autoWin = Boolean(p.autoWin)
+  // Saves from before the tutorial existed: only a player with no progress at all
+  // still gets it; everyone else already knows the game.
+  if (typeof p.tutorialDone !== 'boolean') {
+    p.tutorialDone = p.level > 1 || p.rebirths > 0 || p.best.grassland > 0 || p.stats.capsules > 0
+  }
+  // What the Halloween event left behind.
+  delete p.candy
+  delete p.pumpkins
+  delete p.best.halloween
+  delete p.stats.candy
+  // Never empty-handed (a save holding only removed spinners).
+  if (!p.inventory.length) p.inventory.push({ uid: p.nextUid, id: 'rookie', golden: false, locked: true })
   for (const s of p.inventory) if (s.uid >= p.nextUid) p.nextUid = s.uid + 1
   fixEquipped(p)
+  // Their slots don't stay empty: the best spinners left fill the team.
+  if (removed > 0) equipBest(p)
   return p
 }
 
@@ -123,7 +138,7 @@ export function grantPower(p, amount) {
       const added = addSpinner(p, SLOT_GIFT)
       if (!added) break
       p.equipped.push(added.item.uid)
-      gifts.push({ uid: added.item.uid, id: SLOT_GIFT, isNew: added.isNew })
+      gifts.push({ uid: added.item.uid, id: SLOT_GIFT, isNew: added.isNew, equipped: true })
       opened -= 1
     }
   }

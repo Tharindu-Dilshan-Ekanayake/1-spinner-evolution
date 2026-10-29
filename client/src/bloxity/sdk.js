@@ -97,6 +97,15 @@ export function toUnsubscribe(maybeUnsubscribe) {
   return () => {}
 }
 
+/**
+ * True inside a Boxity page (the portal's iframe). There Boxity's own toolbar handles
+ * signing in and out, so the game never draws Log in / Log out buttons.
+ */
+export function embeddedInBoxity() {
+  const sdk = getSDK()
+  return Boolean(safeCall(sdk?.portal?.isEmbeddedInLegion?.bind(sdk.portal)))
+}
+
 /** Calls `fn` if it exists, swallowing SDK-side errors so they can't kill a render. */
 export function safeCall(fn, ...args) {
   if (typeof fn !== 'function') return undefined

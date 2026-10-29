@@ -1,4 +1,4 @@
-import { RING_POSITIONS, SPINNERS, formatNumber } from '@shared'
+import { LOBBY, RING_POSITIONS, SPINNERS, formatNumber } from '@shared'
 
 import { sfx } from '../../audio/sfx'
 import { live } from '../../store/live'
@@ -9,6 +9,8 @@ import { overlay, popup } from '../overlay/worldOverlay'
 import { SPRITE, fxBatch, shadowBatch } from '../render/fxBatch'
 import { fx } from '../render/particles'
 import { ringFx } from '../world/ringFx'
+import { auraBody, auraLevel, pushAura } from './spinnerAura'
+import { elementOf, pushElement } from './spinnerElement'
 import { spinnerBatch, spinnerPalette } from './spinnerBatch'
 
 /**
@@ -22,7 +24,19 @@ import { spinnerBatch, spinnerPalette } from './spinnerBatch'
 
 const PET_SCALE = 0.72
 const SPIN_SPEED = 17
-const ORBIT_RADIUS = 3.1
+/**
+ * Where spinner `i` of `n` sits in a training ring's dish. Up to 8 share one orbit, with
+ * room to spare; a bigger team (the most is 11) uses two, an inner one of 40% and an
+ * outer one of 60%, each spinner a little smaller, so all 11 fit without touching.
+ */
+const ORBIT = { one: LOBBY.ringRadius * 0.6, inner: LOBBY.ringRadius * 0.43, outer: LOBBY.ringRadius * 0.75 }
+const CROWDED = 9
+const orbitOf = (i, n) => {
+  if (n < CROWDED) return { r: ORBIT.one, k: i, of: n }
+  const outer = Math.ceil(n * 0.6)
+  // The inner ring is half a step round, so its spinners sit between the outer ones.
+  return i < outer ? { r: ORBIT.outer, k: i, of: outer } : { r: ORBIT.inner, k: i - outer + 0.5, of: n - outer }
+}
 const DASH_SPEED = 3.2
 /** Spinners stand on their tip just above the floor decals (paths, carpets). */
 const GROUND_LIFT = 0.06
@@ -55,9 +69,11 @@ function updateOwner(owner, team, ring, n, dt, now, camera, isLocal, q) {
     let tz
     let ty
     if (center) {
-      const a = (i / n) * Math.PI * 2 + now * 0.0006
-      tx = center.x + Math.cos(a) * ORBIT_RADIUS
-      tz = center.z + Math.sin(a) * ORBIT_RADIUS
+      const o = orbitOf(i, n)
+      // Both orbits turn the same way, the inner one a little faster.
+      const a = (o.k / o.of) * Math.PI * 2 + now * (o.r === ORBIT.inner ? 0.0009 : 0.0006)
+      tx = center.x + Math.cos(a) * o.r
+      tz = center.z + Math.sin(a) * o.r
       // On the training ring's dish (its floor is 0.15 up).
       ty = 0.1
       if (!isLocal) {
@@ -105,19 +121,25 @@ function updateOwner(owner, team, ring, n, dt, now, camera, isLocal, q) {
     pet.angle += SPIN_SPEED * dt
     pet.wobble += dt * 3
 
-    const scale = PET_SCALE * (def.scale || 1)
+    const crowded = center && n >= CROWDED
+    const scale = PET_SCALE * (def.scale || 1) * (crowded ? 0.85 : 1)
+    const level = auraLevel(def, member.golden)
     const y = pet.y + GROUND_LIFT + Math.abs(Math.sin(pet.wobble * 1.7)) * 0.03
-    spinnerBatch.push(def.family, pet.x, y, pet.z, pet.angle, 0.06, pet.wobble, scale, spinnerPalette(member.id), def.glow ? 0.6 : 0, pet.attack > 0.6 ? 0.4 : 0, member.golden)
+    spinnerBatch.push(def.family, pet.x, y, pet.z, pet.angle, 0.06, pet.wobble, scale, spinnerPalette(member.id), auraBody(level), pet.attack > 0.6 ? 0.4 : 0, member.golden)
     shadowBatch.push(pet.x, pet.y + 0.04, pet.z, 1.7 * scale, 0, 0, 0.05, 0.35, SPRITE.glow, true)
     // A faint spinning ring where the tip touches the floor.
     if (q.glow) fxBatch.push(pet.x, pet.y + 0.05, pet.z, 1.5 * scale, 1, 1, 1, 0.16, SPRITE.ring, true, pet.angle)
-    if (def.glow && q.glow) {
-      const pal = spinnerPalette(member.id)
-      fxBatch.push(pet.x, y + 0.45, pet.z, 2.3 * scale, pal.a.r, pal.a.g, pal.a.b, 0.5, SPRITE.glow)
+    // The aura: every spinner glows, the rarer the brighter (see spinnerAura.js).
+    if (q.glow) pushAura(pet.x, y, pet.z, scale, spinnerPalette(member.id), level, member.golden, now * 0.001, i * 1.7)
+    // Fire / lightning: steady while training at a ring, a flare on every dash (see spinnerElement.js).
+    if (q.elements > 0) {
+      const kind = elementOf(member.id)
+      if (kind) pushElement(kind, pet.x, y, pet.z, 0.95 * scale, now * 0.001, i * 1.3, center ? 0.55 + 0.45 * pet.attack : pet.attack, q.elements)
     }
     if (member.golden && q.particles && Math.random() < dt * 2) fx.sparkle(pet.x, y + 0.6, pet.z)
     if (isLocal && !center && member.hpText) {
-      overlay.hp(camera, pet.x, y + 1.15, pet.z, 1, 1, 0, '', member.hpText)
+      // Just above its own spinner, small: higher up it sat over the player's arms.
+      overlay.hp(camera, pet.x, y + 0.78, pet.z, 1, 1, 0, '', member.hpText, true)
     }
   }
 }
@@ -133,7 +155,8 @@ function consumeGains(center, ring) {
     if (!center) continue
     if (slot >= 0 && pets && pets[slot]) {
       pets[slot].attack = 1
-      popup(center.x, 2.4, center.z, `+${formatNumber(amount)}`, 'power')
+      // Fanned out by slot, so 11 spinners' numbers don't pile up on one spot.
+      popup(center.x + ((slot % 3) - 1) * 1.1, 2.2 + (slot % 4) * 0.45, center.z, `+${formatNumber(amount)}`, 'power')
     } else {
       popup(center.x, 3, center.z, `+${formatNumber(amount)}`, 'crit')
     }

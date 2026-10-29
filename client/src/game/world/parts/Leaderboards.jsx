@@ -18,7 +18,7 @@ function formatTime(seconds) {
 function drawBoard(board, rows) {
   return (ctx, w, h) => {
     roundRect(ctx, 0, 0, w, h, w * 0.04)
-    ctx.fillStyle = '#1a1f3d'
+    ctx.fillStyle = '#2a2238'
     ctx.fill()
     roundRect(ctx, 0, 0, w, h * 0.13, w * 0.04)
     ctx.fillStyle = COLORS[board.id]
@@ -49,7 +49,7 @@ export function Leaderboards() {
   use(fontsReady)
   const data = useGameStore((s) => s.leaderboards)
   // 512px on LOW (mobile texture budget), 1024px otherwise.
-  const size = useQuality().textureSize >= 512 ? 1024 : 512
+  const size = useQuality().signAtlas
 
   const atlas = useMemo(() => {
     // Just in front of each board's frame, facing the way the board faces.

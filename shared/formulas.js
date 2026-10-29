@@ -1,6 +1,6 @@
 import {
   AURAS,
-  CAPSULES,
+  SHOP_ITEMS,
   GIFTS,
   GOLDEN,
   LIMITS,
@@ -23,14 +23,17 @@ import {
 export const TUNING = {
   /** Power needed for level L -> L+1: base * growth^(L-1) * (1 + linear * (L-1)). */
   levelBase: 60,
-  levelGrowth: 1.25,
+  // 1.23, not 1.25: each rebirth asks 5 more levels, and at 1.25 late rebirth cycles
+  // ballooned to 8+ hours (run scripts/simulate-balance.mjs after changing these).
+  levelGrowth: 1.23,
   levelLinear: 0.5,
   /** Battle HP / damage gained per level above 1. */
   levelStat: 0.08,
   /** Rebirth power multiplier step: x(1 + step * rebirths). */
   rebirthStep: 0.5,
   /** Level required for the next rebirth: base + step * rebirths. */
-  rebirthLevelBase: 5,
+  // First rebirth at Level 8 (~6 min of play): at 5 it came before players knew the game.
+  rebirthLevelBase: 8,
   rebirthLevelStep: 5,
   /** Seconds between automatic training hits, per spinner. */
   trainInterval: 0.8,
@@ -101,6 +104,19 @@ export function slotsFor(level, rebirths) {
   if (hasPerk(rebirths, 'slot2')) bonus += 1
   if (hasPerk(rebirths, 'slot3')) bonus += 1
   return fromLevel + bonus
+}
+
+/**
+ * What unlocks every team slot there is, in order: the level slots ({ level }), then
+ * the rebirth perks' slots ({ rebirths }).
+ */
+export function slotUnlocks() {
+  const out = []
+  for (let level = 1; out.length < levelSlots(1000); level += 1) {
+    while (out.length < levelSlots(level)) out.push({ level })
+  }
+  for (const perk of REBIRTH_PERKS) if (perk.id.startsWith('slot')) out.push({ rebirths: perk.rebirths })
+  return out
 }
 
 /** Level at which the next level-based slot unlocks, or null when maxed. */
@@ -177,7 +193,6 @@ export function computeStats(profile, now = Date.now()) {
     levelMult: lvlMult,
     powerMult,
     winsMult,
-    candyMult: aura ? aura.candy : 1,
     dmgMult: lvlMult * (aura ? aura.dmg : 1),
     hpMult: lvlMult * (aura ? aura.hp : 1),
     speedMult: 1 + (trail ? trail.speed : 0),
@@ -219,24 +234,19 @@ export function resetFormulaCaches() {
   stageCache.length = 1
 }
 
-/** Halloween stage `h` (1-8) fights like global stage 2h + 1. */
-export function globalStage(worldId, stage) {
-  return worldId === 'halloween' ? stage * 2 + 1 : stage
-}
-
 /**
  * The enemy army for a stage: total HP, total damage per hit, and how it is split
  * into individual spinners. From stage 4 on there is a crowned boss holding half the
  * HP; the rest is split between minions.
  */
 export function stageArmy(worldId, stage) {
-  const s = globalStage(worldId, stage)
+  const s = stage
   const k = stageScale(s)
   const hp = Math.round(TUNING.stageHp * k)
   const dmg = TUNING.stageDmg * k
   // Army size follows the stage's place inside its world, so every world ramps up
   // from a lone spinner to a boss with a full escort.
-  const local = worldId === 'halloween' ? stage : stage - (WORLDS[worldId]?.firstStage || 1) + 1
+  const local = stage - (WORLDS[worldId]?.firstStage || 1) + 1
   const count = Math.min(6, 1 + Math.floor((local - 1) / 2) + (s > 10 ? 1 : 0))
   const hasBoss = local >= 4 && count > 1
 
@@ -255,21 +265,14 @@ export function stageArmy(worldId, stage) {
   return { hp, dmg, units, global: s }
 }
 
-/** Wins for clearing a stage (before multipliers). Halloween pays candy instead. */
+/** Wins for clearing a stage (before multipliers). */
 export function stageWins(worldId, stage) {
-  if (worldId === 'halloween') return 0
   return Math.round(Math.pow(TUNING.winsBase, stage - 1))
 }
 
-export function stageCandy(worldId, stage) {
-  if (worldId !== 'halloween') return 0
-  return 2 + stage * 2
-}
-
-/** World that contains global stage `s` (Halloween excluded). */
+/** World that contains global stage `s`. */
 export function worldOfStage(s) {
   for (const w of Object.values(WORLDS)) {
-    if (w.event) continue
     if (s >= w.firstStage && s < w.firstStage + w.stageCount) return w
   }
   return null
@@ -279,7 +282,6 @@ export function worldUnlocked(worldId, profile) {
   const w = WORLDS[worldId]
   if (!w) return false
   if (profile.rebirths < w.rebirths) return false
-  if (w.event) return (profile.best?.grassland || 0) >= w.requiresStage
   return bestGlobalStage(profile) >= w.requiresStage
 }
 
@@ -296,44 +298,27 @@ export function winsUnit(profile) {
 }
 
 /* ---------------------------------------------------------------------------
- * Capsules
+ * The Spinners Shop
  * ------------------------------------------------------------------------- */
 
-/**
- * Drop table with the Lucky potion applied: the two rarest drops are doubled, then
- * everything is renormalised to 100.
- */
-export function capsuleOdds(capsuleId, lucky = false) {
-  const capsule = CAPSULES[capsuleId]
-  if (!capsule) return []
-  const drops = capsule.drops.map((d, i) => ({
-    spinner: d.spinner,
-    chance: lucky && i >= capsule.drops.length - 2 ? d.chance * 2 : d.chance,
-  }))
-  const total = drops.reduce((sum, d) => sum + d.chance, 0)
-  return drops.map((d) => ({ spinner: d.spinner, chance: (d.chance / total) * 100 }))
-}
+/** While a Lucky potion runs, spinners cost this much of their price. */
+export const LUCKY_DISCOUNT = 0.75
 
-/** Rolls one spinner. `rand` defaults to Math.random; the simulator passes a seeded one. */
-export function rollCapsule(capsuleId, lucky = false, rand = Math.random) {
-  const odds = capsuleOdds(capsuleId, lucky)
-  let roll = rand() * 100
-  for (const d of odds) {
-    roll -= d.chance
-    if (roll <= 0) return d.spinner
-  }
-  return odds[odds.length - 1]?.spinner
+/** What a spinner costs right now (the Lucky potion takes 25% off), or null if not sold. */
+export function spinnerPrice(id, lucky = false) {
+  const item = SHOP_ITEMS[id]
+  if (!item) return null
+  return lucky ? Math.max(1, Math.round(item.cost * LUCKY_DISCOUNT)) : item.cost
 }
 
 /* ---------------------------------------------------------------------------
  * Gifts and rewards
  * ------------------------------------------------------------------------- */
 
-/** Turns a reward spec ({ wins: units, candy, potion }) into concrete amounts. */
+/** Turns a reward spec ({ wins: units, potion }) into concrete amounts. */
 export function resolveReward(reward, profile) {
   return {
     wins: reward.wins ? Math.round(reward.wins * winsUnit(profile)) : 0,
-    candy: reward.candy || 0,
     potion: reward.potion && POTIONS[reward.potion] ? reward.potion : null,
   }
 }

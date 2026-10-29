@@ -5,7 +5,7 @@ import { act } from '../actions'
 import { Panel } from '../common'
 
 function Box({ children, color }) {
-  return <div className={`${color} studs stroke relative flex h-14 flex-1 items-center justify-center rounded-lg border-4 border-black/70 text-3xl`}>{children}</div>
+  return <div className={`${color} stroke relative flex h-14 flex-1 items-center justify-center rounded-lg border-4 border-black/70 text-3xl`}>{children}</div>
 }
 
 export default function RebirthPanel() {
@@ -17,7 +17,7 @@ export default function RebirthPanel() {
   const nextRing = RING_LIST.find((r) => r.rebirths === profile.rebirths + 1)
 
   return (
-    <Panel title="REBIRTH" icon="🔄" color="g-purple" onClose={close}>
+    <Panel title="REBIRTH" icon="rebirth" onClose={close}>
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-center">
         <div className="stroke text-2xl">Before</div>
         <div />
@@ -37,8 +37,8 @@ export default function RebirthPanel() {
         </div>
       </div>
 
-      <div className="stroke mt-2 text-center text-lg text-yellow-300">⚠️ REBIRTH RESETS YOUR LEVEL AND WINS! ⚠️</div>
-      <div className="stroke-sm text-center text-sm">Spinners, trails, auras, candy and potions are kept.</div>
+      <div className="stroke mt-2 text-center text-lg text-yellow-300">Rebirth resets your level, for a permanent power boost.</div>
+      <div className="stroke-sm text-center text-sm">Your wins, spinners, trails, auras and potions are all kept.</div>
 
       <div className="mt-2 flex justify-center">
         <button type="button" disabled={!ready} className="gbtn g-rainbow stroke px-10 py-2 text-3xl" onClick={() => act(C2S.rebirth)}>
@@ -62,7 +62,14 @@ export default function RebirthPanel() {
                 <div className="stroke text-lg leading-tight">{perk.name}</div>
                 <div className="stroke-sm text-xs">{perk.desc}</div>
               </div>
-              <span className="text-xl">{owned ? '✅' : '🔒'}</span>
+              {/* AUTO WIN is switched on and off here (it has no HUD button). */}
+              {perk.id === 'autoWin' && owned ? (
+                <button type="button" className={`gbtn ${profile.autoWin ? 'g-green' : 'g-gray'} stroke px-3 py-1 text-base`} onClick={() => act(C2S.autoWin, { on: !profile.autoWin })}>
+                  {profile.autoWin ? 'ON' : 'OFF'}
+                </button>
+              ) : (
+                <span className="text-xl">{owned ? '✅' : '🔒'}</span>
+              )}
             </div>
           )
         })}

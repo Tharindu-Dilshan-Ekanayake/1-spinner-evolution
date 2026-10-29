@@ -16,25 +16,24 @@ const Q = (text, type, target, reward, extra = {}) => ({ text, type, target, rew
 export const QUESTS = [
   Q('Train on a Target to reach Level 2!', 'level', 2, { winsFlat: 3 }),
   Q('Walk through the BATTLE STAGES door and beat Stage 1!', 'stage', 1, { winsFlat: 3 }),
-  Q('Open a Basic Capsule in the Wins Shop!', 'capsules', 1, { potion: 'power' }),
+  Q('Buy a spinner in the Spinners Shop!', 'capsules', 1, { potion: 'power' }),
   Q('Reach Level 5 to equip a 3rd spinner!', 'level', 5, { winsFlat: 10 }),
   Q('Clear Stage 3!', 'stage', 3, { winsFlat: 15 }),
-  Q('Buy the Orange Trail!', 'trails', 1, { candy: 10 }),
+  Q('Buy the Orange Trail!', 'trails', 1, { potion: 'wins' }),
   Q('Rebirth for a power multiplier!', 'rebirths', 1, { potion: 'lucky' }),
-  Q('Open 10 capsules!', 'capsules', 10, { wins: 1 }),
+  Q('Buy 10 spinners!', 'capsules', 10, { wins: 1 }),
   Q('Clear Stage 5!', 'stage', 5, { wins: 1 }),
-  Q('Collect 20 candy (pumpkins & Halloween)!', 'candy', 20, { potion: 'wins' }),
-  Q('Clear Halloween Stage 2!', 'halloween', 2, { candy: 20 }),
+  Q('Clear Stage 6!', 'stage', 6, { potion: 'wins' }),
   Q('Reach Rebirth 2!', 'rebirths', 2, { wins: 2 }),
   Q('Equip 4 spinners at once!', 'equipped', 4, { potion: 'power' }),
   Q('Clear Stage 8!', 'stage', 8, { wins: 2 }),
   Q('Craft a Golden spinner (5 of the same)!', 'golden', 1, { potion: 'lucky' }),
   Q('Clear Stage 10 to finish Grassland!', 'stage', 10, { wins: 3 }),
-  Q('Buy an Aura!', 'auras', 1, { candy: 30 }),
+  Q('Buy an Aura!', 'auras', 1, { wins: 2 }),
   Q('Reach Rebirth 3 to unlock AUTO WIN!', 'rebirths', 3, { wins: 2 }),
   Q('Clear Stage 11 in Lava Land!', 'stage', 11, { wins: 3 }),
-  Q('Open 100 capsules!', 'capsules', 100, { potion: 'lucky' }),
-  Q('Clear Halloween Stage 8!', 'halloween', 8, { candy: 100 }),
+  Q('Buy 100 spinners!', 'capsules', 100, { potion: 'lucky' }),
+  Q('Clear Stage 13!', 'stage', 13, { wins: 3 }),
   Q('Reach Rebirth 5 for 2X POWER!', 'rebirths', 5, { wins: 3 }),
   Q('Clear Stage 15!', 'stage', 15, { wins: 3 }),
   Q('Buy the Crystal Spinner!', 'crystal', 1, { potion: 'wins' }),
@@ -54,8 +53,6 @@ function measure(type, profile) {
       return profile.level
     case 'stage':
       return bestGlobalStage(profile)
-    case 'halloween':
-      return profile.best?.halloween || 0
     case 'capsules':
       return st.capsules || 0
     case 'trails':
@@ -64,8 +61,6 @@ function measure(type, profile) {
       return profile.auras.length
     case 'rebirths':
       return profile.rebirths
-    case 'candy':
-      return st.candy || 0
     case 'equipped':
       return profile.equipped.length
     case 'golden':
@@ -79,7 +74,7 @@ function measure(type, profile) {
 
 /**
  * The quest at `index`. Past the end of the chain, quests repeat forever: alternately
- * "reach the next rebirth" and "open 250 more capsules".
+ * "reach the next rebirth" and "buy 250 more spinners".
  */
 export function questAt(index, profile) {
   if (index < QUESTS.length) return QUESTS[index]
@@ -89,7 +84,7 @@ export function questAt(index, profile) {
     return Q(`Reach Rebirth ${target}!`, 'rebirths', target, { wins: 6, potion: 'lucky' })
   }
   const target = (Math.floor((profile.stats?.capsules || 0) / 250) + 1) * 250
-  return Q(`Open ${target} capsules!`, 'capsules', target, { wins: 4, potion: 'power' })
+  return Q(`Buy ${target} spinners!`, 'capsules', target, { wins: 4, potion: 'power' })
 }
 
 /** { quest, progress, target, done } for the player's current quest. */

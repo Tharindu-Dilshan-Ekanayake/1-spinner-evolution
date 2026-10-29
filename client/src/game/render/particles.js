@@ -173,6 +173,20 @@ export const fx = {
     spawnEffect('flash', x, y, z, { dur: 0.18, r: 1, g: 0.85, b: 0.4, size: big ? 2.6 : 1.5 })
     emit(x, y, z, big ? 14 : 7, { speed: 7, up: 4, life: 0.35, size: 0.22, r: 1, g: 0.65, b: 0.15, sprite: SPRITE.glow, gravity: 12 })
   },
+  /**
+   * A hit by a fire (kind 1) or lightning (kind 2) spinner: a coloured shock ring and
+   * sparks on top of the plain hit; embers fly up from fire, bright arcs of sparks out
+   * of lightning.
+   */
+  hitElement(x, y, z, kind, big = false) {
+    const fire = kind === 1
+    spawnEffect('ring', x, y, z, { dur: 0.35, r: fire ? 1 : 0.45, g: fire ? 0.5 : 0.8, b: fire ? 0.1 : 1, size: big ? 5.5 : 3.6 })
+    if (fire) {
+      emit(x, y, z, big ? 12 : 6, { speed: 3, up: 6, life: 0.7, size: 0.3, r: 1, g: 0.45, b: 0.08, sprite: SPRITE.glow, gravity: -2, grow: 0.5 })
+    } else {
+      emit(x, y, z, big ? 14 : 8, { speed: 8, up: 2, life: 0.3, size: 0.32, r: 0.6, g: 0.9, b: 1, sprite: SPRITE.sparkle, gravity: 2 })
+    }
+  },
   levelUp(x, y, z) {
     spawnEffect('beam', x, y, z, { dur: 1.4, r: 1, g: 0.9, b: 0.25, size: 2.4 })
     spawnEffect('ring', x, y, z, { dur: 0.8, r: 1, g: 0.95, b: 0.4, size: 7 })

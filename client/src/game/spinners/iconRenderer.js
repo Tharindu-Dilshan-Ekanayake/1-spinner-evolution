@@ -73,10 +73,12 @@ function coloredGeometry(family, a, b, golden) {
   const ca = new Color(a)
   const cb = new Color(b)
   const metal = new Color(0.78, 0.8, 0.86)
+  const accent = ca.clone().lerp(new Color(1, 1, 1), 0.5)
+  const dark = ca.clone().multiplyScalar(0.32)
   const gold = new Color(1, 0.72, 0.15)
   for (let i = 0; i < parts.count; i += 1) {
     const p = parts.getX(i)
-    const c = (p < 0.5 ? ca : p < 1.5 ? cb : metal).clone()
+    const c = (p < 0.5 ? ca : p < 1.5 ? cb : p < 2.5 ? metal : p < 3.5 ? accent : dark).clone()
     if (golden) c.lerp(gold, 0.65)
     colors[i * 3] = c.r
     colors[i * 3 + 1] = c.g

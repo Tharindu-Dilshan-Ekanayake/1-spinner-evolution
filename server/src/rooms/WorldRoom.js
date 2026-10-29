@@ -4,13 +4,12 @@ import {
   ANIM,
   BATTLE,
   C2S,
-  CAPSULES,
-  CAPSULE_POSITIONS,
+  EMOTE_ID,
+  boardScores,
   CRYSTAL_POSITION,
   LIMITS,
   LOBBY,
   LOBBY_SPOTS,
-  PUMPKINS,
   RINGS,
   S2C,
   STAGE,
@@ -23,15 +22,14 @@ import {
   encodeFrame,
   equippedSpinners,
   hasPerk,
-  gateFront,
-  nearGate,
+  onPlayerPad,
+  retrySpot,
   playerPad,
   questProgress,
   returnPad,
   ringAt,
   spinnerStats,
   stageArmy,
-  stageCandy,
   stageWins,
   trainGain,
   worldOfZone,
@@ -39,11 +37,12 @@ import {
   WORLDS_PORTAL,
   zoneOfWorld,
 } from '../../../shared/index.js'
+import { BLOXITY, queueScores, verifyPlayer } from '../bloxity.js'
 import { BattleSim } from '../game/BattleSim.js'
 import * as eco from '../game/economy.js'
 import { getLeaderboards } from '../game/leaderboard.js'
 import { addSpinner, createProfile, equipBest, fixEquipped, grantPower, migrateProfile, teamCodes } from '../game/profiles.js'
-import { getProfile, markDirty, putProfile, saveNow } from '../game/store.js'
+import { ensureProfiles, getProfile, markDirty, putProfile, releaseProfile, saveNow } from '../game/store.js'
 import { PlayerState, WorldState } from './schema.js'
 
 /** Which room each profile is currently playing in, so a second tab kicks the first. */
@@ -70,11 +69,12 @@ function cleanId(id) {
 }
 
 /**
- * The one room type: a shared lobby plus every world. Up to 16 players see each
- * other; each player's training, battles and stage run are simulated here.
+ * The one room type: a shared lobby plus every world, for up to 8 players. When a room
+ * is full, joinOrCreate puts the next player in a fresh one (a new lobby of 8). Each
+ * player's training, battles and stage run are simulated here.
  */
 export class WorldRoom extends Room {
-  maxClients = 16
+  maxClients = 8
 
   onCreate() {
     this.state = new WorldState()
@@ -94,18 +94,20 @@ export class WorldRoom extends Room {
       })
 
     on(C2S.move, (s, m) => this.onMove(s, m))
+    on(C2S.emote, (s, m) => this.onEmote(s, m))
     on(C2S.click, (s) => this.onClick(s))
     on(C2S.train, (s, m) => this.onTrain(s, m.ring || null))
-    on(C2S.fight, (s, m) => this.fightGate(s, String(m.world || ''), Number(m.stage)))
+    on(C2S.fight, (s, m) => this.fightPad(s, String(m.world || ''), Number(m.stage)))
     on(C2S.giveUp, (s) => s.battle && this.endBattle(s, 'giveup'))
     on(C2S.collectRun, (s) => this.collectRun(s, true))
     on(C2S.teleport, (s, m) => this.teleport(s, String(m.to || 'lobby'), String(m.spot || '')))
-    on(C2S.openCapsule, (s, m) => this.openCapsule(s, String(m.capsule), Number(m.count) || 1))
+    on(C2S.buySpinner, (s, m) => this.buySpinner(s, String(m?.id || '')))
     on(C2S.buyCrystal, (s) => this.buyCrystal(s))
     on(C2S.equip, (s, m) => this.act(s, eco.equip(s.profile, Number(m.uid)), { team: true }))
     on(C2S.unequip, (s, m) => this.act(s, eco.unequip(s.profile, Number(m.uid)), { team: true }))
     on(C2S.equipBest, (s) => this.act(s, eco.doEquipBest(s.profile), { team: true }))
     on(C2S.unequipAll, (s) => this.act(s, eco.unequipAll(s.profile), { team: true }))
+    on(C2S.equipSlot, (s, m) => this.act(s, eco.equipSlot(s.profile, Number(m?.slot), Number(m?.uid)), { team: true }))
     on(C2S.deleteSpinners, (s, m) =>
       this.act(s, eco.deleteSpinners(s.profile, (m.uids || []).map(Number)), { team: true }),
     )
@@ -124,7 +126,6 @@ export class WorldRoom extends Room {
     on(C2S.usePotion, (s, m) => this.act(s, eco.usePotion(s.profile, String(m.id)), { sound: 'potion' }))
     on(C2S.claimGift, (s, m) => this.reward(s, eco.claimGift(s.profile, String(m.id)), 'Gift'))
     on(C2S.claimDaily, (s) => this.reward(s, eco.claimDaily(s.profile), 'Daily reward'))
-    on(C2S.pumpkin, (s, m) => this.collectPumpkin(s, String(m.id)))
     on(C2S.autoWin, (s, m) => this.setAutoWin(s, Boolean(m.on)))
     on(C2S.ping, (s, m) => s.client.send(S2C.pong, { t: m.t }))
 
@@ -132,7 +133,7 @@ export class WorldRoom extends Room {
     if (process.env.ALLOW_CHEATS === '1') {
       on(C2S.debug, (s, m) => {
         const p = s.profile
-        for (const key of ['rebirths', 'wins', 'candy', 'level']) if (isNum(m[key])) p[key] = m[key]
+        for (const key of ['rebirths', 'wins', 'level']) if (isNum(m[key])) p[key] = m[key]
         if (m.best && typeof m.best === 'object') Object.assign(p.best, m.best)
         if (Array.isArray(m.give)) for (const id of m.give) if (typeof id === 'string') addSpinner(p, id, Boolean(m.golden))
         equipBest(p)
@@ -142,18 +143,40 @@ export class WorldRoom extends Room {
     }
 
     this.setSimulationInterval((dtMs) => this.tick(dtMs / 1000), BATTLE.tickMs)
-    this.clock.setInterval(() => this.broadcast(S2C.leaderboards, getLeaderboards()), 30000)
+    this.clock.setInterval(() => {
+      this.broadcast(S2C.leaderboards, getLeaderboards())
+      for (const s of this.sessions.values()) if (s.boxityId) queueScores(s.boxityId, boardScores(s.profile))
+    }, 30000)
   }
 
   /* -------------------------------------------------------------------------
    * Join / leave
    * ----------------------------------------------------------------------- */
 
+  /**
+   * Asks Boxity whose token this is before the join, so a save is only ever keyed by an
+   * identity Boxity vouches for. Never rejects: without a valid token (or with Boxity
+   * unreachable) the player just joins as a guest.
+   */
+  async onAuth(client, options = {}) {
+    const token = typeof options.token === 'string' ? options.token.slice(0, 4096) : ''
+    const slug = BLOXITY.gameSlug || (typeof options.gameSlug === 'string' ? options.gameSlug.slice(0, 64) : '')
+    const auth = (await verifyPlayer(token, slug)) || { userId: null, carriedFrom: [] }
+    // Load this player's save(s) from the database before they join. If that fails the
+    // join fails (the client retries): joining with a blank save would overwrite theirs.
+    const keys = []
+    if (cleanId(auth.userId)) keys.push(`u:${auth.userId}`)
+    if (cleanId(options.guestId)) keys.push(`g:${options.guestId}`)
+    for (const id of auth.carriedFrom || []) if (cleanId(id)) keys.push(`u:${id}`)
+    await ensureProfiles(keys)
+    return auth
+  }
+
   onJoin(client, options = {}) {
-    // Logged-in Bloxity players are keyed by their account id; guests by a random id
-    // their browser keeps. NOTE: the Bloxity token is not verified yet (see the
-    // /api/legion-auth TODO in http.js), so a determined client could claim any id.
-    const userId = cleanId(options.userId)
+    // Signed-in Boxity players are keyed by their verified account id (onAuth); guests
+    // by a random id their browser keeps.
+    const auth = client.auth || {}
+    const userId = cleanId(auth.userId)
     const guestId = cleanId(options.guestId)
     const key = userId ? `u:${userId}` : guestId ? `g:${guestId}` : `s:${client.sessionId}`
     const name = cleanName(options.name)
@@ -165,6 +188,11 @@ export class WorldRoom extends Room {
     }
 
     let profile = getProfile(key)
+    // First time on this account: bring the progress made as a guest along.
+    if (!profile && userId) {
+      const carried = (auth.carriedFrom || []).map(cleanId).filter(Boolean).map((id) => `u:${id}`)
+      profile = this.carryGuestProgress(key, guestId ? [...carried, `g:${guestId}`] : carried)
+    }
     if (profile) migrateProfile(profile)
     else {
       profile = createProfile(key, name)
@@ -190,6 +218,9 @@ export class WorldRoom extends Room {
       ring: '',
       battling: false,
       avatar: typeof options.avatar === 'string' ? options.avatar.slice(0, 2000) : '',
+      uid: userId || '',
+      emote: '',
+      emoteSeq: 0,
     })
     player.team.push(...teamCodes(profile))
     this.state.players.set(client.sessionId, player)
@@ -197,6 +228,8 @@ export class WorldRoom extends Room {
     const session = {
       client,
       key,
+      /** Verified Boxity account id (null for guests): its scores go to Boxity. */
+      boxityId: userId,
       profile,
       player,
       pos: { x: player.x, y: player.y, z: player.z },
@@ -220,19 +253,42 @@ export class WorldRoom extends Room {
     if (done.length) this.announceQuests(session, done)
   }
 
+  /**
+   * Copies the newest unused guest save into a new account (the guest played first,
+   * then signed in), and marks that save as used so it can never seed another account.
+   * @returns the account's new profile, or null when there is nothing to carry
+   */
+  carryGuestProgress(key, guestKeys) {
+    for (const guestKey of guestKeys) {
+      const guest = getProfile(guestKey)
+      if (!guest || guest.carriedTo || activeSessions.has(guestKey)) continue
+      const copy = structuredClone(guest)
+      copy.key = key
+      copy.carriedFrom = guestKey
+      guest.carriedTo = key
+      putProfile(key, copy)
+      markDirty()
+      return copy
+    }
+    return null
+  }
+
   onLeave(client) {
     const session = this.sessions.get(client.sessionId)
     if (!session) return
     if (session.run) this.payRun(session)
+    if (session.boxityId) queueScores(session.boxityId, boardScores(session.profile))
     session.profile.lastSeen = Date.now()
     markDirty()
     this.sessions.delete(client.sessionId)
     this.state.players.delete(client.sessionId)
     if (activeSessions.get(session.key)?.client === client) activeSessions.delete(session.key)
+    // Saved to the database now, and out of this pod's memory (unless they rejoined).
+    if (!activeSessions.has(session.key)) releaseProfile(session.key)
   }
 
   onDispose() {
-    saveNow()
+    saveNow().catch((err) => console.error('[room] final save failed', err))
   }
 
   /* -------------------------------------------------------------------------
@@ -252,7 +308,6 @@ export class WorldRoom extends Room {
       level: p.level,
       power: p.power,
       wins: p.wins,
-      candy: p.candy,
       rebirths: p.rebirths,
       playtime: p.stats.playtime,
       giftSeconds: p.gifts.seconds,
@@ -325,6 +380,14 @@ export class WorldRoom extends Room {
    * Movement and zones
    * ----------------------------------------------------------------------- */
 
+  /** A Boxity emote (from Boxity's own picker) for everyone to see; '' stops it. */
+  onEmote(s, m) {
+    const id = String(m?.id || '')
+    if ((id && !EMOTE_ID.test(id)) || s.battle) return
+    s.player.emote = id
+    if (id) s.player.emoteSeq = ((s.player.emoteSeq || 0) + 1) % 256
+  }
+
   onMove(s, m) {
     if (!Array.isArray(m) || m.length < 5) return
     const [x, y, z, ry, anim] = m
@@ -382,16 +445,12 @@ export class WorldRoom extends Room {
     if (!world || zoneOfWorld(to) !== to) return
     if (!worldUnlocked(to, s.profile)) {
       const why =
-        s.profile.rebirths < world.rebirths
-          ? `Requires Rebirth ${world.rebirths}!`
-          : world.event
-            ? `Clear Stage ${world.requiresStage} first!`
-            : `Clear Stage ${world.requiresStage} first!`
+        s.profile.rebirths < world.rebirths ? `Requires Rebirth ${world.rebirths}!` : `Clear Stage ${world.requiresStage} first!`
       s.client.send(S2C.toast, { text: why, kind: 'error' })
       return
     }
     if (s.run) this.payRun(s)
-    s.run = { world: to, cleared: 0, wins: 0, candy: 0 }
+    s.run = { world: to, cleared: 0, wins: 0 }
     this.place(s, to, STAGE.spawn)
     this.sendRun(s)
   }
@@ -494,19 +553,21 @@ export class WorldRoom extends Room {
   }
 
   /**
-   * Touching gate k's glass ("KILL THE ENEMIES TO ENTER"): fight stage k from the
-   * blue pad behind it. Gate 1 also starts the run.
+   * Standing on stage k's blue pad starts the fight (walking around the stage doesn't).
+   * The first fight of a run, on stage 1's pad, also starts the run.
    */
-  fightGate(s, worldId, k) {
+  fightPad(s, worldId, k) {
     if (s.battle || !Number.isInteger(k)) return
     const world = WORLDS[worldId]
     if (!world || worldOfZone(s.zone) !== worldId) return
     const cleared = s.run && s.run.world === worldId ? s.run.cleared : 0
-    if (k !== cleared + 1 || k > world.stageCount) return
-    if (!nearGate(k, s.pos, 3)) return
+    // Any stage already cleared in this run can be fought again for its wins, as well as
+    // the next one: walk back to an earlier blue pad whenever you want to farm it.
+    if (k < 1 || k > cleared + 1 || k > world.stageCount) return
+    if (!onPlayerPad(k, s.pos, 2)) return
     if (!s.run || s.run.world !== worldId) {
       if (s.run) this.payRun(s)
-      s.run = { world: worldId, cleared: 0, wins: 0, candy: 0 }
+      s.run = { world: worldId, cleared: 0, wins: 0 }
     }
     this.beginStage(s, k)
   }
@@ -524,10 +585,10 @@ export class WorldRoom extends Room {
     this.onTrain(s, null)
     const pad = playerPad(k)
     // On the blue pad, facing the arena.
-    this.place(s, zoneOfWorld(run.world), { x: pad.x, y: 0, z: pad.z, ry: Math.PI })
+    this.place(s, zoneOfWorld(run.world), { x: pad.x, y: STAGE.padTop, z: pad.z, ry: Math.PI })
     this.sendRun(s)
     const stats = computeStats(s.profile)
-    const global = world.event ? k : world.firstStage + k - 1
+    const global = world.firstStage + k - 1
     const army = stageArmy(run.world, global)
     const sim = new BattleSim({
       team: team.map((sp) => {
@@ -573,24 +634,22 @@ export class WorldRoom extends Room {
     if (!b) return
     s.battle = null
     s.player.battling = false
-    s.player.anim = ANIM.idle
 
     const p = s.profile
     const won = result === 'win'
+    // Everyone nearby sees the reaction: a victory hop or a defeat on the knees. The
+    // client's own moves take over again once the player walks off.
+    s.player.anim = won ? ANIM.cheer : ANIM.defeat
     const run = s.run
-    let reward = { wins: 0, candy: 0 }
+    let reward = { wins: 0 }
 
     if (won && run) {
       const stats = computeStats(p)
-      reward = {
-        wins: Math.round(stageWins(b.world, b.global) * stats.winsMult),
-        candy: Math.round(stageCandy(b.world, b.k) * stats.candyMult),
-      }
-      run.cleared = b.k
+      reward = { wins: Math.round(stageWins(b.world, b.global) * stats.winsMult) }
+      // Replaying an earlier stage pays its wins but never sets the run back.
+      run.cleared = Math.max(run.cleared, b.k)
       run.wins += reward.wins
-      run.candy += reward.candy
-      const bestValue = WORLDS[b.world].event ? b.k : b.global
-      if (bestValue > (p.best[b.world] || 0)) p.best[b.world] = bestValue
+      if (b.global > (p.best[b.world] || 0)) p.best[b.world] = b.global
       p.stats.battlesWon += 1
     } else {
       p.stats.battlesLost += 1
@@ -614,9 +673,9 @@ export class WorldRoom extends Room {
         s.pending = { at: AUTO_DELAY_S, action: finished ? 'restart' : 'next' }
       }
     } else if (run) {
-      // Lost (or gave up): back in front of the gate. The run - and the Return pad
+      // Lost (or gave up): step off beside the blue pad. The run - and the Return pad
       // with everything won so far - stays; train up and try again.
-      this.place(s, zoneOfWorld(b.world), gateFront(b.k))
+      this.place(s, zoneOfWorld(b.world), retrySpot(b.k))
       this.sendRun(s)
       if (s.profile.autoWin && hasPerk(p.rebirths, 'autoWin') && result !== 'giveup') {
         s.pending = { at: AUTO_DELAY_S + 1, action: 'restart' }
@@ -627,15 +686,15 @@ export class WorldRoom extends Room {
     markDirty()
   }
 
-  /** Banks the run's wins and candy into the profile. */
+  /** Banks the run's wins into the profile. */
   payRun(s) {
     const run = s.run
     if (!run) return
-    if (run.wins > 0 || run.candy > 0) {
-      eco.grantReward(s.profile, { wins: run.wins, candy: run.candy })
+    if (run.wins > 0) {
+      eco.grantReward(s.profile, { wins: run.wins })
       s.client.send(S2C.reward, {
         label: run.cleared >= (WORLDS[run.world]?.stageCount || 99) ? 'World cleared!' : 'Run complete!',
-        reward: { wins: run.wins, candy: run.candy },
+        reward: { wins: run.wins },
         run: true,
       })
       s.profileDirty = true
@@ -679,7 +738,7 @@ export class WorldRoom extends Room {
     // is Grassland).
     const worldId = s.run ? s.run.world : worldOfZone(s.zone)
     if (!worldId) return
-    if (!s.run) s.run = { world: worldId, cleared: 0, wins: 0, candy: 0 }
+    if (!s.run) s.run = { world: worldId, cleared: 0, wins: 0 }
     const done = s.run.cleared >= WORLDS[worldId].stageCount
     s.pending = { at: 0.5, action: done ? 'restart' : 'next' }
   }
@@ -695,7 +754,7 @@ export class WorldRoom extends Room {
     if (job.action === 'restart') {
       const world = s.run.world
       this.payRun(s)
-      s.run = { world, cleared: 0, wins: 0, candy: 0 }
+      s.run = { world, cleared: 0, wins: 0 }
     }
     const k = s.run.cleared + 1
     if (k > WORLDS[s.run.world].stageCount) return
@@ -706,17 +765,15 @@ export class WorldRoom extends Room {
    * Shop actions that depend on where you stand
    * ----------------------------------------------------------------------- */
 
-  openCapsule(s, capsuleId, count) {
-    const capsule = CAPSULES[capsuleId]
-    const spot = CAPSULE_POSITIONS[capsuleId]
-    if (!capsule || !spot) return
-    if (s.zone !== 'lobby' || dist2d(s.pos, spot) > 9) {
-      s.client.send(S2C.toast, { text: `Walk up to the ${capsule.name} to open it!`, kind: 'error' })
-      return
-    }
-    const result = eco.openCapsule(s.profile, capsuleId, count)
+  /** Spinners can be bought anywhere (the Shop button) as well as at their stands. */
+  buySpinner(s, id) {
+    if (s.battle) return
+    const result = eco.buySpinner(s.profile, id)
+    // The first-time tutorial ends with your first spinner bought after beating Stage 1:
+    // train, battle, bank, spend. (Wins from a gift alone don't skip the battle lesson.)
+    if (result.ok && (s.profile.best?.grassland || 0) >= 1) s.profile.tutorialDone = true
     if (this.act(s, result, { team: true })) {
-      s.client.send(S2C.capsule, { capsule: capsuleId, results: result.results })
+      s.client.send(S2C.capsule, { capsule: 'buy', results: result.results })
     }
   }
 
@@ -740,17 +797,6 @@ export class WorldRoom extends Room {
     s.client.send(S2C.toast, { text: `REBIRTH ${result.rebirths}! Power x${(1 + TUNING.rebirthStep * result.rebirths).toFixed(1)}`, kind: 'rebirth' })
   }
 
-  collectPumpkin(s, id) {
-    const pk = PUMPKINS.find((p) => p.id === id)
-    if (!pk || s.zone !== 'lobby' || dist2d(s.pos, pk) > 4) return
-    const result = eco.collectPumpkin(s.profile, id)
-    if (!result.ok) return
-    s.client.send(S2C.reward, { label: 'Pumpkin!', reward: result.reward, quiet: true, pumpkin: id })
-    s.profileDirty = true
-    this.afterProgress(s)
-    markDirty()
-  }
-
   /* -------------------------------------------------------------------------
    * Tick
    * ----------------------------------------------------------------------- */
@@ -760,34 +806,57 @@ export class WorldRoom extends Room {
     const statsTick = this.tickCount % STATS_EVERY_TICKS === 0
 
     for (const s of this.sessions.values()) {
-      const p = s.profile
-      s.clickTokens = Math.min(LIMITS.clicksPerSecond, s.clickTokens + LIMITS.clicksPerSecond * dt)
-      p.stats.playtime += dt
-      p.gifts.seconds += dt
-
-      if (s.battle) this.battleTick(s, dt)
-      else {
-        this.trainTick(s, dt)
-        this.pendingTick(s, dt)
-      }
-
-      if (s.gains.length) {
-        s.client.send(S2C.gain, s.gains)
-        s.gains = []
-      }
-
-      if (s.profileDirty) {
-        fixEquipped(p)
-        this.sendProfile(s)
-      } else if (s.statsDirty && statsTick) {
-        this.sendStats(s)
+      // One player's bad state must never stop the room ticking for everyone else.
+      try {
+        this.tickSession(s, dt, statsTick)
+      } catch (err) {
+        console.error(`[room] tick failed for ${s.key}`, err)
       }
     }
 
     // Every 10s, refresh stats anyway so playtime/gift timers stay in sync.
     if (this.tickCount % 200 === 0) {
-      for (const s of this.sessions.values()) this.sendStats(s)
+      for (const s of this.sessions.values()) {
+        try {
+          this.sendStats(s)
+        } catch (err) {
+          console.error(`[room] stats failed for ${s.key}`, err)
+        }
+      }
     }
+  }
+
+  tickSession(s, dt, statsTick) {
+    const p = s.profile
+    s.clickTokens = Math.min(LIMITS.clicksPerSecond, s.clickTokens + LIMITS.clicksPerSecond * dt)
+    p.stats.playtime += dt
+    p.gifts.seconds += dt
+
+    if (s.battle) this.battleTick(s, dt)
+    else {
+      this.trainTick(s, dt)
+      this.pendingTick(s, dt)
+    }
+
+    if (s.gains.length) {
+      s.client.send(S2C.gain, s.gains)
+      s.gains = []
+    }
+
+    if (s.profileDirty) {
+      fixEquipped(p)
+      this.sendProfile(s)
+    } else if (s.statsDirty && statsTick) {
+      this.sendStats(s)
+    }
+  }
+
+  /**
+   * Anything that still throws inside the room (a hook, a timer) is logged here
+   * instead of taking the server down with every lobby on it.
+   */
+  onUncaughtException(error, methodName) {
+    console.error(`[room ${this.roomId}] ${methodName} threw`, error)
   }
 }
 

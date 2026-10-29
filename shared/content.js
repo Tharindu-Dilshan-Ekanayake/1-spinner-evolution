@@ -4,7 +4,7 @@
  *
  * Both the Colyseus server (authoritative) and the client (display) import this file,
  * so a number changed here changes it everywhere. Nothing in the game is bought with
- * Bux: prices are in wins, candy (Halloween) or gated by rebirths.
+ * Bux: prices are in wins or gated by rebirths.
  *
  * Balance notes live next to the numbers; `scripts/simulate-balance.mjs` plays the
  * whole progression with a bot and prints how long each milestone takes.
@@ -21,7 +21,6 @@ export const RARITIES = {
   epic: { name: 'Epic', color: '#b45cff', order: 3 },
   legendary: { name: 'Legendary', color: '#ffb321', order: 4 },
   mythic: { name: 'Mythic', color: '#ff3d6e', order: 5 },
-  event: { name: 'Halloween', color: '#ff7a18', order: 5 },
   secret: { name: 'Secret', color: '#ffffff', order: 6, rainbow: true },
 }
 
@@ -143,16 +142,6 @@ const SPINNER_LIST = [
     glow: true,
   }),
 
-  // Halloween Capsule (candy)
-  S('pumpkin_spin', 'Pumpkin Spin', 'event', 'dome', '#ff7a00', '#2d7d00', 420, 5000),
-  S('ghost_whirl', 'Ghost Whirl', 'event', 'disc', '#eef3ff', '#7b6cff', 950, 11400, {
-    glow: true,
-  }),
-  S('bat_wing', 'Bat Wing', 'event', 'blade', '#3a0f4f', '#ff7a00', 2300, 27600, { glow: true }),
-  S('reaper_scythe', 'Reaper Scythe', 'secret', 'saw', '#0a0a0a', '#a6ff00', 6200, 74000, {
-    glow: true,
-  }),
-
   // Shop
   S('crystal', 'Crystal Spinner', 'mythic', 'blade', '#b06bff', '#7df9ff', 2400, 28800, {
     glow: true,
@@ -170,83 +159,99 @@ export const GOLDEN = {
 }
 
 /* ---------------------------------------------------------------------------
- * Capsules (the Wins Shop)
+ * The Spinners Shop
+ *
+ * Every spinner is bought directly: pick the one you want and pay its price in wins
+ * at its pad in the lobby's Spinners Shop or from the Shop
+ * button. No random capsules. The tiers keep the ids, colours, lobby spots and rebirth
+ * locks the old capsules had (so code still calls them "capsules"); a spinner's price
+ * is what it used to cost on average through its capsule - capsule price / drop chance
+ * - so the game is paced as before. `weight` is that old drop chance.
  * ------------------------------------------------------------------------- */
 
-const C = (id, name, currency, cost, rebirths, drops, color) => ({
-  id,
-  name,
-  currency,
-  cost,
-  rebirths,
-  drops: drops.map(([spinner, chance]) => ({ spinner, chance })),
-  color,
-})
+/** Two significant figures, so prices read well: 7.5 -> 8, 1333 -> 1300. */
+function nicePrice(v) {
+  const step = 10 ** Math.max(0, Math.floor(Math.log10(v)) - 1)
+  return Math.round(v / step) * step
+}
+
+const C = (id, name, currency, capsulePrice, rebirths, drops, color) => {
+  const items = drops.map(([spinner, weight]) => ({ spinner, cost: nicePrice((capsulePrice * 100) / weight) }))
+  return {
+    id,
+    name,
+    currency,
+    /** The cheapest spinner here ("from 8 Wins"). */
+    cost: Math.min(...items.map((it) => it.cost)),
+    rebirths,
+    items,
+    color,
+  }
+}
 
 export const CAPSULE_LIST = [
-  C('basic', 'Basic Capsule', 'wins', 3, 0, [
+  C('basic', 'Basic Spinners', 'wins', 3, 0, [
     ['basic', 40],
     ['aqua_saw', 30],
     ['sky_blade', 20],
     ['lime_star', 10],
   ], '#4fb4ff'),
-  C('common', 'Common Capsule', 'wins', 25, 0, [
+  C('common', 'Common Spinners', 'wins', 25, 0, [
     ['jade_whirl', 45],
     ['candy_twist', 30],
     ['coral_dome', 15],
     ['toxic_saw', 10],
   ], '#3ddc6a'),
-  C('rare', 'Rare Capsule', 'wins', 200, 0, [
+  C('rare', 'Rare Spinners', 'wins', 200, 0, [
     ['storm_blade', 50],
     ['sun_disc', 25],
     ['royal_star', 15],
     ['violet_fang', 10],
   ], '#2f7bff'),
-  C('epic', 'Epic Capsule', 'wins', 1500, 1, [
+  C('epic', 'Epic Spinners', 'wins', 1500, 1, [
     ['frost_core', 50],
     ['ember_saw', 30],
     ['emerald_titan', 15],
     ['void_star', 5],
   ], '#b45cff'),
-  C('exclusive', 'Exclusive Capsule', 'wins', 6000, 2, [
+  C('exclusive', 'Exclusive Spinners', 'wins', 6000, 2, [
     ['neon_viper', 60],
     ['cyber_disc', 35],
     ['shadow_reaper', 4],
     ['golden_emperor', 1],
   ], '#ff3df2'),
-  C('legendary', 'Legendary Capsule', 'wins', 12000, 3, [
+  C('legendary', 'Legendary Spinners', 'wins', 12000, 3, [
     ['thunder_god', 50],
     ['magma_king', 30],
     ['celestia', 17],
     ['prism_core', 3],
   ], '#ffb321'),
-  C('mythic', 'Mythic Capsule', 'wins', 100000, 5, [
+  C('mythic', 'Mythic Spinners', 'wins', 100000, 5, [
     ['dragon_fury', 50],
     ['galaxy_core', 30],
     ['phoenix_blade', 17],
     ['omega', 3],
   ], '#ff3d6e'),
-  C('celestial', 'Celestial Capsule', 'wins', 900000, 8, [
+  C('celestial', 'Celestial Spinners', 'wins', 900000, 8, [
     ['nebula_dome', 50],
     ['solar_saw', 32],
     ['astral_blade', 15],
     ['cosmic_god', 3],
   ], '#7a2cff'),
-  C('godly', 'Godly Capsule', 'wins', 8000000, 12, [
+  C('godly', 'Godly Spinners', 'wins', 8000000, 12, [
     ['titan_x', 50],
     ['abyss_saw', 32],
     ['seraph', 15],
     ['infinity', 3],
   ], '#ffe14d'),
-  C('halloween', 'Halloween Capsule', 'candy', 40, 0, [
-    ['pumpkin_spin', 55],
-    ['ghost_whirl', 30],
-    ['bat_wing', 12],
-    ['reaper_scythe', 3],
-  ], '#ff7a00'),
 ]
 
 export const CAPSULES = Object.fromEntries(CAPSULE_LIST.map((c) => [c.id, c]))
+
+/** spinner id -> { tier, cost, currency, rebirths }: everything the shop sells. */
+export const SHOP_ITEMS = Object.fromEntries(
+  CAPSULE_LIST.flatMap((t) => t.items.map((it) => [it.spinner, { tier: t.id, cost: it.cost, currency: t.currency, rebirths: t.rebirths }])),
+)
 
 /** The Crystal Spinner on its pedestal: a direct purchase. */
 export const CRYSTAL_OFFER = { spinner: 'crystal', cost: 40000, rebirths: 4 }
@@ -295,25 +300,24 @@ export const TRAILS = Object.fromEntries(TRAIL_LIST.map((t) => [t.id, t]))
  * ------------------------------------------------------------------------- */
 
 export const AURA_LIST = [
-  { id: 'spark', name: 'Spark Aura', currency: 'wins', cost: 150, rebirths: 1, wins: 1.25, dmg: 1, hp: 1, candy: 1, color: '#7df9ff' },
-  { id: 'flame', name: 'Flame Aura', currency: 'wins', cost: 4000, rebirths: 2, wins: 1.5, dmg: 1.1, hp: 1, candy: 1, color: '#ff6a1f' },
-  { id: 'frost', name: 'Frost Aura', currency: 'wins', cost: 40000, rebirths: 4, wins: 2, dmg: 1.1, hp: 1.15, candy: 1, color: '#9fe8ff' },
-  { id: 'storm', name: 'Storm Aura', currency: 'wins', cost: 500000, rebirths: 7, wins: 2.5, dmg: 1.2, hp: 1.2, candy: 1, color: '#ffe14d' },
-  { id: 'shadow', name: 'Shadow Aura', currency: 'wins', cost: 6000000, rebirths: 10, wins: 3.5, dmg: 1.25, hp: 1.25, candy: 1, color: '#7a2cff' },
-  { id: 'divine', name: 'Divine Aura', currency: 'wins', cost: 60000000, rebirths: 15, wins: 5, dmg: 1.4, hp: 1.4, candy: 1, color: '#fff2b0' },
-  { id: 'spooky', name: 'Spooky Aura', currency: 'candy', cost: 300, rebirths: 0, wins: 2, dmg: 1.1, hp: 1.1, candy: 2, color: '#ff7a00' },
+  { id: 'spark', name: 'Spark Aura', currency: 'wins', cost: 150, rebirths: 1, wins: 1.25, dmg: 1, hp: 1, color: '#7df9ff' },
+  { id: 'flame', name: 'Flame Aura', currency: 'wins', cost: 4000, rebirths: 2, wins: 1.5, dmg: 1.1, hp: 1, color: '#ff6a1f' },
+  { id: 'frost', name: 'Frost Aura', currency: 'wins', cost: 40000, rebirths: 4, wins: 2, dmg: 1.1, hp: 1.15, color: '#9fe8ff' },
+  { id: 'storm', name: 'Storm Aura', currency: 'wins', cost: 500000, rebirths: 7, wins: 2.5, dmg: 1.2, hp: 1.2, color: '#ffe14d' },
+  { id: 'shadow', name: 'Shadow Aura', currency: 'wins', cost: 6000000, rebirths: 10, wins: 3.5, dmg: 1.25, hp: 1.25, color: '#7a2cff' },
+  { id: 'divine', name: 'Divine Aura', currency: 'wins', cost: 60000000, rebirths: 15, wins: 5, dmg: 1.4, hp: 1.4, color: '#fff2b0' },
 ]
 
 export const AURAS = Object.fromEntries(AURA_LIST.map((a) => [a.id, a]))
 
 /* ---------------------------------------------------------------------------
- * Potions (earned from gifts, quests, daily rewards and pumpkins - never bought)
+ * Potions (earned from gifts, quests and daily rewards - never bought)
  * ------------------------------------------------------------------------- */
 
 export const POTIONS = {
   power: { id: 'power', name: '2x Power', icon: '💪', minutes: 10, desc: 'Double training power' },
   wins: { id: 'wins', name: '2x Wins', icon: '🏆', minutes: 10, desc: 'Double wins from stages' },
-  lucky: { id: 'lucky', name: 'Lucky', icon: '🍀', minutes: 10, desc: 'Rare spinners drop 2x more' },
+  lucky: { id: 'lucky', name: 'Lucky', icon: '🍀', minutes: 10, desc: 'Spinners cost 25% less' },
 }
 
 /* ---------------------------------------------------------------------------
@@ -336,8 +340,7 @@ export const REBIRTH_PERKS = [
  * Worlds and stages
  *
  * Stages are numbered globally (Grassland 1-10, Lava 11-20, Galaxy 21-30) so enemy
- * strength and rewards are one continuous curve. Halloween has its own 8 stages that
- * pay candy.
+ * strength and rewards are one continuous curve.
  * ------------------------------------------------------------------------- */
 
 export const WORLD_LIST = [
@@ -373,17 +376,6 @@ export const WORLD_LIST = [
     enemy: { a: '#6a00ff', b: '#00e5ff', boss: '#ff4df0' },
     theme: 'galaxy',
   },
-  {
-    id: 'halloween',
-    name: 'Halloween',
-    firstStage: 1,
-    stageCount: 8,
-    rebirths: 0,
-    requiresStage: 2,
-    enemy: { a: '#ff7a00', b: '#1a1a1a', boss: '#a6ff00' },
-    theme: 'halloween',
-    event: true,
-  },
 ]
 
 export const WORLDS = Object.fromEntries(WORLD_LIST.map((w) => [w.id, w]))
@@ -405,22 +397,22 @@ export const GIFTS = [
   { id: 'g1', minutes: 1, reward: { wins: 0.5 } },
   { id: 'g2', minutes: 3, reward: { potion: 'power' } },
   { id: 'g3', minutes: 6, reward: { wins: 1 } },
-  { id: 'g4', minutes: 10, reward: { candy: 15 } },
+  { id: 'g4', minutes: 10, reward: { wins: 1.5 } },
   { id: 'g5', minutes: 15, reward: { potion: 'lucky' } },
   { id: 'g6', minutes: 20, reward: { wins: 2 } },
   { id: 'g7', minutes: 30, reward: { potion: 'wins' } },
   { id: 'g8', minutes: 45, reward: { wins: 4 } },
-  { id: 'g9', minutes: 60, reward: { potion: 'power', candy: 40 } },
+  { id: 'g9', minutes: 60, reward: { potion: 'power', wins: 3 } },
   { id: 'g10', minutes: 90, reward: { wins: 8, potion: 'lucky' } },
 ]
 
 export const DAILY_REWARDS = [
   { day: 1, reward: { wins: 1 } },
   { day: 2, reward: { potion: 'power' } },
-  { day: 3, reward: { wins: 2, candy: 20 } },
+  { day: 3, reward: { wins: 3 } },
   { day: 4, reward: { potion: 'lucky' } },
   { day: 5, reward: { wins: 4 } },
-  { day: 6, reward: { potion: 'wins', candy: 40 } },
+  { day: 6, reward: { potion: 'wins', wins: 3 } },
   { day: 7, reward: { wins: 10, potion: 'lucky' } },
 ]
 

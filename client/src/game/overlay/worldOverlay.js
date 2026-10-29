@@ -41,7 +41,8 @@ export function mountOverlay(container) {
   root = container
   pools.hp = makePool(48, 'wl wl-hp', buildHp)
   pools.name = makePool(18, 'wl wl-name')
-  pools.bubble = makePool(4, 'wl wl-bubble')
+  // A chat line per player in a full room, plus the arena's champion lines.
+  pools.bubble = makePool(10, 'wl wl-bubble')
   pools.popup = makePool(48, 'wl wl-pop', null, 'translate(-50%, -50%)')
   framePools = [pools.hp, pools.name, pools.bubble]
   for (const pool of Object.values(pools)) for (const it of pool.items) root.appendChild(it.el)
@@ -102,17 +103,23 @@ export const overlay = {
   },
 
   /** side: 0 = ours (green), 1 = enemy (orange/red). icon: '' | 'skull' | 'crown' */
-  hp(camera, x, y, z, hp, maxHp, side, icon, numText) {
+  hp(camera, x, y, z, hp, maxHp, side, icon, numText, small = false) {
     if (!project(camera, x, y, z)) return
     const it = take(pools.hp)
     if (!it) return
     place(it, (_v.x * 0.5 + 0.5) * width, (-_v.y * 0.5 + 0.5) * height)
+    if (small !== it.small) {
+      it.small = small
+      it.el.classList.toggle('wl-hp-sm', small)
+    }
     const fill = Math.max(0, Math.min(1, hp / maxHp))
     const f = Math.round(fill * 100)
     if (f !== it.fill) {
       it.fill = f
       it.parts.fill.style.width = `${f}%`
-      it.parts.fill.className = side === 0 ? 'wl-fill' : fill > 0.5 ? 'wl-fill wl-enemy' : 'wl-fill wl-enemy-low'
+      // Ours: green, amber under half, red under a quarter. Enemies: orange, red when low.
+      it.parts.fill.className =
+        side === 0 ? (fill > 0.5 ? 'wl-fill' : fill > 0.25 ? 'wl-fill wl-mid' : 'wl-fill wl-low') : fill > 0.5 ? 'wl-fill wl-enemy' : 'wl-fill wl-enemy-low'
     }
     if (numText !== it.key || icon !== it.sub) {
       it.key = numText
@@ -175,7 +182,7 @@ export const overlay = {
 
 const POPUP_MS = 900
 
-/** kind: 'power' | 'dmg' | 'hurt' | 'wins' | 'candy' | 'crit' */
+/** kind: 'power' | 'dmg' | 'hurt' | 'wins' | 'crit' */
 export function popup(x, y, z, text, kind = 'power') {
   const pool = pools.popup
   if (!pool) return

@@ -20,6 +20,7 @@ import { quality } from '../../../store/qualityStore'
 import { ORDER, useSystem } from '../../loop'
 import { SPRITE, fxBatch } from '../../render/fxBatch'
 import { fx } from '../../render/particles'
+import { PALETTE } from '../../sceneStyle'
 import { InstancedSet } from './Instanced'
 import { scaleMatrix } from './builders'
 
@@ -73,7 +74,7 @@ function buildPad() {
     [R * 0.5, 0.455],
     [0, STAGE.returnPadTop],
   ])
-  const merged = mergeGeometries([colorize(base, '#24306e'), colorize(rim, '#e8a800'), colorize(top, '#ffe14d')], false)
+  const merged = mergeGeometries([colorize(base, PALETTE.navy), colorize(rim, '#e8a800'), colorize(top, '#ffe14d')], false)
   merged.computeVertexNormals()
   return merged
 }
@@ -140,24 +141,28 @@ export function ReturnPads({ worldId, pads }) {
     const px = live.player.x
     const pz = live.player.z
     const far = q.viewDistance * q.viewDistance
+    // Only the trophies of pads in view are drawn: they're packed at the front of the
+    // instance list and the rest cut off, so far pads cost nothing at all.
+    let drawn = 0
     for (let i = 0; i < pads.length; i += 1) {
       const pad = pads[i]
       const active = pad.k <= cleared
       const dx = pad.x - px
       const dz = pad.z - pz
       const near = dx * dx + dz * dz < far
+      if (!near) continue
       // Trophies circling and bobbing above the pad.
       if (mesh) {
         for (let j = 0; j < TROPHIES_PER_PAD; j += 1) {
           const a = t * 1.3 + (j / TROPHIES_PER_PAD) * Math.PI * 2 + i
           _p.set(pad.x + Math.cos(a) * 1.1, 1.6 + Math.sin(t * 2.4 + j * 2) * 0.22, pad.z + Math.sin(a) * 1.1)
           _q.setFromAxisAngle(_up, -a + t * 2)
-          const sc = near ? (active ? 0.85 : 0.6) : 0
+          const sc = active ? 0.85 : 0.6
           _s.set(sc, sc, sc)
-          mesh.setMatrixAt(i * TROPHIES_PER_PAD + j, _m.compose(_p, _q, _s))
+          mesh.setMatrixAt(drawn, _m.compose(_p, _q, _s))
+          drawn += 1
         }
       }
-      if (!near) continue
       const pulse = 0.5 + 0.5 * Math.sin(t * 3 + i)
       const glow = active ? 1 : 0.45
       fxBatch.push(pad.x, 0.5, pad.z, STAGE.returnPadRadius * 2.6 * (1 + pulse * 0.2), 1, 0.85, 0.2, (0.45 + pulse * 0.35) * glow, SPRITE.ring, true, t)
@@ -166,7 +171,10 @@ export function ReturnPads({ worldId, pads }) {
         fx.sparkle(pad.x + (Math.random() - 0.5) * 3.6, 1, pad.z + (Math.random() - 0.5) * 3.6, 1, 0.85, 0.3)
       }
     }
-    if (mesh) mesh.instanceMatrix.needsUpdate = true
+    if (mesh) {
+      mesh.count = drawn
+      mesh.instanceMatrix.needsUpdate = true
+    }
   })
 
   if (!pads.length) return null

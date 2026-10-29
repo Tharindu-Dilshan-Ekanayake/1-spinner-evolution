@@ -16,14 +16,18 @@ import {
  * All the text in a world - "TRAIN POWER", "Basic Capsule 3 Wins", "Stage 4 148 HP" -
  * drawn into ONE canvas atlas and rendered as ONE instanced mesh.
  *
- * sign = { x, y, z, ry, w, h, draw(ctx, pw, ph), billboard?, double? }
+ * sign = { x, y, z, ry, w, h, draw(ctx, pw, ph), billboard?, double?, far?, near? }
  *   w/h are world units; draw() paints into a pw x ph pixel rect (origin moved there).
  *   billboard signs turn around Y to face the camera.
+ *   far: past this distance the sign fades out (floating labels only show up close, so
+ *        the scene never fills with overlapping text).
+ *   near: closer than this the sign fades out too (labels over things you walk up to,
+ *        so they don't crowd the prompt that appears there).
  *
  * Unlit (MeshBasicMaterial) so signs stay bright like Roblox SurfaceGuis.
  */
 
-export const FONT = '"Lilita One", "Arial Black", system-ui, sans-serif'
+export const FONT = '"Fredoka One", "Arial Black", system-ui, sans-serif'
 
 /**
  * Assigning ctx.font makes the browser re-parse the font string, which made it the
@@ -42,7 +46,7 @@ export function drawText(ctx, text, x, y, size, fill = '#ffffff', stroke = '#1b1
   ctx.textAlign = align
   ctx.textBaseline = 'middle'
   ctx.lineJoin = 'round'
-  ctx.lineWidth = Math.max(3, size * 0.22)
+  ctx.lineWidth = Math.max(3, size * 0.15)
   ctx.strokeStyle = stroke
   ctx.strokeText(text, x, y)
   if (Array.isArray(fill)) {
@@ -122,8 +126,9 @@ export function createSignAtlas(signs, { atlasSize = 1024, density = 40 } = {}) 
   }
 
   const canvas = document.createElement('canvas')
-  canvas.width = atlasSize
-  canvas.height = atlasSize
+  // An empty atlas (a placeholder that only gets its shader compiled) needs no pixels.
+  canvas.width = signs.length ? atlasSize : 1
+  canvas.height = signs.length ? atlasSize : 1
   const ctx = canvas.getContext('2d')
   signs.forEach((s, i) => {
     const r = rects[i]
@@ -145,9 +150,13 @@ export function createSignAtlas(signs, { atlasSize = 1024, density = 40 } = {}) 
   const geometry = new PlaneGeometry(1, 1)
   const rectAttr = new InstancedBufferAttribute(new Float32Array(signs.length * 4), 4)
   const billAttr = new InstancedBufferAttribute(new Float32Array(signs.length), 1)
+  const farAttr = new InstancedBufferAttribute(new Float32Array(signs.length), 1)
+  const nearAttr = new InstancedBufferAttribute(new Float32Array(signs.length), 1)
   rectAttr.setUsage(DynamicDrawUsage)
   geometry.setAttribute('iRect', rectAttr)
   geometry.setAttribute('iBill', billAttr)
+  geometry.setAttribute('iFar', farAttr)
+  geometry.setAttribute('iNear', nearAttr)
 
   const material = new MeshBasicMaterial({
     map: texture,
@@ -157,6 +166,11 @@ export function createSignAtlas(signs, { atlasSize = 1024, density = 40 } = {}) 
     // (billboards always face the camera anyway).
     side: FrontSide,
     toneMapped: false,
+    // Signs hang a hair in front of their boards: pulled forward in the depth test so
+    // the board behind can never flicker through at a distance.
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -4,
   })
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
@@ -164,7 +178,9 @@ export function createSignAtlas(signs, { atlasSize = 1024, density = 40 } = {}) 
         '#include <common>',
         `#include <common>
         attribute vec4 iRect;
-        attribute float iBill;`,
+        attribute float iBill;
+        attribute float iFar;
+        attribute float iNear;`,
       )
       .replace('#include <uv_vertex>', '#include <uv_vertex>\n vMapUv = vec2(iRect.x + uv.x * iRect.z, iRect.y + uv.y * iRect.w);')
       .replace(
@@ -180,7 +196,9 @@ export function createSignAtlas(signs, { atlasSize = 1024, density = 40 } = {}) 
           mvPosition = modelViewMatrix * instanceMatrix * vec4(transformed, 1.0);
         }
         // Fade signs the camera is about to pass through instead of filling the screen.
-        vSignFade = smoothstep(3.0, 9.0, -mvPosition.z);
+        vSignFade = smoothstep(max(3.0, iNear * 0.7), max(9.0, iNear), -mvPosition.z);
+        // ...and floating labels beyond their range, so they never pile up.
+        if (iFar > 0.0) vSignFade *= 1.0 - smoothstep(iFar * 0.75, iFar, -mvPosition.z);
         gl_Position = projectionMatrix * mvPosition;`,
       )
       .replace('#include <common>', '#include <common>\n varying float vSignFade;')
@@ -195,6 +213,8 @@ export function createSignAtlas(signs, { atlasSize = 1024, density = 40 } = {}) 
     // Canvas y grows down, texture v grows up (flipY).
     rectAttr.setXYZW(i, r.x / atlasSize, 1 - (r.y + r.ph) / atlasSize, r.pw / atlasSize, r.ph / atlasSize)
     billAttr.setX(i, s.billboard ? 1 : 0)
+    farAttr.setX(i, s.far || 0)
+    nearAttr.setX(i, s.near || 0)
     _p.set(s.x, s.y, s.z)
     _q.setFromAxisAngle(_up, s.ry || 0)
     _s.set(s.w, s.h, 1)
@@ -209,6 +229,21 @@ export function createSignAtlas(signs, { atlasSize = 1024, density = 40 } = {}) 
   return {
     mesh,
     texture,
+    /**
+     * Shows sign `i` at `amount` (0..1) of its height, kept hanging from its top edge,
+     * so a board can roll up out of sight and back down again.
+     */
+    setShown(i, amount) {
+      const s = signs[i]
+      const k = Math.max(0, Math.min(1, amount))
+      _p.set(s.x, s.y + (s.h / 2) * (1 - k), s.z)
+      _q.setFromAxisAngle(_up, s.ry || 0)
+      if (k > 0.001) _s.set(s.w, s.h * k, 1)
+      else _s.set(0, 0, 0)
+      _m.compose(_p, _q, _s)
+      mesh.setMatrixAt(i, _m)
+      mesh.instanceMatrix.needsUpdate = true
+    },
     /** Re-run the draw() of every sign (e.g. leaderboards changed). */
     redraw(next) {
       ctx.clearRect(0, 0, atlasSize, atlasSize)

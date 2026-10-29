@@ -83,7 +83,7 @@ export function Effects() {
   useSystem(-1, () => overlay.begin())
 
   useSystem(ORDER.batchBegin, (_dt, state) => {
-    spinnerBatch.begin(state.camera)
+    spinnerBatch.begin(state.camera, quality().spinnerLod)
     fxBatch.begin()
     shadowBatch.begin()
   })
@@ -126,9 +126,7 @@ export function Effects() {
 
   return (
     <>
-      {spinnerBatch.meshes.map((mesh) => (
-        <primitive key={mesh.uuid} object={mesh} />
-      ))}
+      <primitive object={spinnerBatch.group} />
       <primitive object={shadowBatch.mesh} />
       <primitive object={fxBatch.mesh} />
     </>

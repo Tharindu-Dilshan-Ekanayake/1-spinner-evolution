@@ -27,6 +27,13 @@ export const PlayerState = schema(
     battling: t.boolean(),
     /** Bloxity avatar (equipped ids + proportions) as JSON, so others see our look. */
     avatar: t.string(),
+    /** Boxity account id, only once Boxity has verified it ('' for guests): chat
+     *  bubbles find their speaker by it. */
+    uid: t.string(),
+    /** Boxity emote being played ('' for none); emoteSeq ticks each time one starts,
+     *  so the same emote twice in a row still plays twice. */
+    emote: t.string(),
+    emoteSeq: t.uint8(),
   },
   'PlayerState',
 )

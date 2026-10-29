@@ -1,10 +1,15 @@
 @import 'tailwindcss';
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
   font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+  /*
+   * HUD unit: one pixel of a 1920x1080 reference layout, scaled to fit the viewport
+   * and floored so touch targets stay usable on phones (same as +1 Slide Downhill).
+   */
+  --px: clamp(0.42px, min(100vw / 1920, 100vh / 1080), 1.4px);
 }
 
 html,
@@ -14,6 +19,7 @@ body,
   margin: 0;
   overflow: hidden;
   overscroll-behavior: none;
+  background: #a6d6fb;
 }
 
 /* The R3F canvas fills its container; the HUD is absolutely positioned over it. */
@@ -28,35 +34,53 @@ canvas {
  */
 @layer components {
 /* ---------------------------------------------------------------------------
- * Game typography: chunky font with a thick dark outline, like Roblox sims.
+ * Typography: Fredoka One with a thick black outline (the studio UI kit)
  * ------------------------------------------------------------------------- */
 
-.game-font {
-  font-family: 'Lilita One', 'Arial Black', system-ui, sans-serif;
+.game-font,
+.pp-font {
+  font-family: 'Fredoka One', 'Arial Black', system-ui, sans-serif;
   letter-spacing: 0.01em;
+  /* All HUD text is white unless it says otherwise (the page itself is light-scheme). */
+  color: #fff;
 }
 
+/* Outlined text, see ui/kit/StrokeText.jsx. */
+.pp-text {
+  position: relative;
+  display: inline-block;
+  font-family: 'Fredoka One', 'Arial Black', system-ui, sans-serif;
+  white-space: nowrap;
+}
+.pp-text-stroke {
+  position: absolute;
+  inset: 0;
+  color: #0d1430;
+  -webkit-text-stroke-color: #0d1430;
+  -webkit-text-stroke-width: 6px;
+  text-shadow: 0 0.05em 0.04em rgba(5, 8, 22, 0.55);
+  pointer-events: none;
+  user-select: none;
+}
+.pp-text-fill {
+  position: relative;
+}
+
+/* Single-element outline, for text that wraps or sits inside class-styled buttons. */
 .stroke {
   color: #fff;
-  -webkit-text-stroke: 0;
-  text-shadow:
-    0 3px 0 #10101c,
-    2px 2px 0 #10101c,
-    -2px 2px 0 #10101c,
-    2px -2px 0 #10101c,
-    -2px -2px 0 #10101c,
-    3px 0 0 #10101c,
-    -3px 0 0 #10101c,
-    0 -3px 0 #10101c;
+  -webkit-text-stroke: 0.1em #0d1430;
+  paint-order: stroke fill;
+  text-shadow: 0 0.05em 0.04em rgba(5, 8, 22, 0.55);
+  letter-spacing: 0.015em;
 }
 
+/* Small captions: a thinner outline, so the letters stay open and readable. */
 .stroke-sm {
-  text-shadow:
-    0 2px 0 #10101c,
-    1px 1px 0 #10101c,
-    -1px 1px 0 #10101c,
-    1px -1px 0 #10101c,
-    -1px -1px 0 #10101c;
+  -webkit-text-stroke: 0.075em #0d1430;
+  paint-order: stroke fill;
+  text-shadow: 0 0.04em 0.03em rgba(5, 8, 22, 0.5);
+  letter-spacing: 0.02em;
 }
 
 .rainbow-text {
@@ -67,7 +91,7 @@ canvas {
   color: transparent;
   animation: rainbow 2.4s linear infinite;
   text-shadow: none;
-  filter: drop-shadow(0 2px 0 #10101c) drop-shadow(1px 0 0 #10101c) drop-shadow(-1px 0 0 #10101c);
+  filter: drop-shadow(0 2px 0 #111) drop-shadow(1.5px 0 0 #111) drop-shadow(-1.5px 0 0 #111) drop-shadow(0 -1.5px 0 #111);
 }
 
 @keyframes rainbow {
@@ -77,98 +101,284 @@ canvas {
 }
 
 /* ---------------------------------------------------------------------------
- * Buttons
+ * Buttons: the chunky style - gradient face, glossy top, black outline and a
+ * dark lip the button presses down into.
  * ------------------------------------------------------------------------- */
 
-.gbtn {
+.pp-btn {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.pp-btn:disabled {
+  cursor: default;
+}
+
+/* Dark glass notification cards with a coloured edge on the left. */
+.pp-glass {
   position: relative;
-  border: 3px solid rgba(10, 10, 25, 0.75);
-  border-radius: 12px;
+  border: calc(var(--px) * 2.5) solid rgba(255, 255, 255, 0.16);
+  border-left: calc(var(--px) * 7) solid var(--accent, #4cb8ff);
+  background: linear-gradient(180deg, rgba(44, 54, 84, 0.95) 0%, rgba(20, 25, 44, 0.95) 100%);
   box-shadow:
-    inset 0 -5px 0 rgba(0, 0, 0, 0.25),
-    inset 0 3px 0 rgba(255, 255, 255, 0.35),
-    0 4px 0 rgba(0, 0, 0, 0.35);
+    0 calc(var(--px) * 8) calc(var(--px) * 20) rgba(0, 0, 0, 0.4),
+    inset 0 calc(var(--px) * 2) 0 rgba(255, 255, 255, 0.1);
+}
+.pp-glass-title {
+  color: #fff;
+  letter-spacing: 0.01em;
+  text-shadow: 0 2px 3px rgba(0, 0, 0, 0.6);
+  line-height: 1.1;
+}
+.pp-glass-sub {
+  color: #c9d3ee;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  line-height: 1.15;
+}
+
+/* The left menu tiles: dark glass cards with a thin accent line. */
+.pp-tile {
+  border-radius: calc(var(--px) * 22);
+  border: calc(var(--px) * 2.5) solid rgba(255, 255, 255, 0.16);
+  background: linear-gradient(180deg, rgba(44, 54, 84, 0.94) 0%, rgba(20, 25, 44, 0.94) 100%);
+  box-shadow:
+    0 calc(var(--px) * 8) calc(var(--px) * 18) rgba(0, 0, 0, 0.38),
+    inset 0 calc(var(--px) * 2) 0 rgba(255, 255, 255, 0.12);
+  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+  overflow: visible;
+}
+.pp-tile::after {
+  content: '';
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: calc(var(--px) * 7);
+  height: calc(var(--px) * 4);
+  border-radius: 99px;
+  background: var(--accent);
+  box-shadow: 0 0 calc(var(--px) * 10) var(--accent);
+}
+.pp-tile:hover {
+  transform: translateY(calc(var(--px) * -3));
+  border-color: var(--accent);
+  background: linear-gradient(180deg, rgba(58, 70, 106, 0.96) 0%, rgba(26, 32, 54, 0.96) 100%);
+}
+.pp-tile:active {
+  transform: scale(0.96);
+}
+.pp-tile-label {
+  font-family: inherit;
+  color: #fff;
+  letter-spacing: 0.02em;
+  text-shadow: 0 2px 3px rgba(0, 0, 0, 0.6);
+  margin-bottom: calc(var(--px) * 10);
+}
+.pp-tile-pill {
+  position: absolute;
+  padding: calc(var(--px) * 1) calc(var(--px) * 9);
+  border-radius: 99px;
+  color: #fff;
+  background: linear-gradient(180deg, #ff6a7a, #d4263f);
+  border: calc(var(--px) * 2) solid rgba(0, 0, 0, 0.55);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+}
+
+.pp-chunky {
+  --lip: calc(var(--px) * 6);
+  box-shadow:
+    0 var(--lip) 0 #111,
+    0 calc(var(--lip) + var(--px) * 4) calc(var(--px) * 6) rgba(0, 0, 0, 0.3),
+    inset 0 calc(var(--px) * -5) 0 rgba(0, 0, 0, 0.2);
   transition:
-    transform 0.08s ease,
-    filter 0.12s ease;
+    transform 0.07s ease-out,
+    box-shadow 0.07s ease-out,
+    filter 0.12s;
+}
+.pp-chunky:hover:not(:disabled) {
+  transform: translateY(calc(var(--px) * -2));
+  filter: brightness(1.07) saturate(1.05);
+}
+.pp-chunky:active:not(:disabled) {
+  transform: translateY(calc(var(--lip) - var(--px) * 1));
+  box-shadow:
+    0 calc(var(--px) * 1) 0 #111,
+    inset 0 calc(var(--px) * -3) 0 rgba(0, 0, 0, 0.2);
+}
+.pp-chunky:disabled {
+  filter: saturate(0.35) brightness(0.92);
+}
+.pp-chunky > * {
+  z-index: 1;
+}
+.pp-chunky > :not(.absolute) {
+  position: relative;
+}
+.pp-chunky > .pp-gloss {
+  position: absolute;
+  z-index: 0;
+  left: 6%;
+  right: 6%;
+  top: 7%;
+  height: 42%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0.1) 100%);
+  pointer-events: none;
+}
+
+/* The same look for buttons written as <button className="gbtn g-green">. */
+.gbtn {
+  --lip: 5px;
+  position: relative;
+  isolation: isolate;
+  border: 4px solid #111;
+  border-radius: 14px;
   cursor: pointer;
   pointer-events: auto;
   color: #fff;
-}
-
-.gbtn:hover {
-  filter: brightness(1.08);
-  transform: translateY(-1px) scale(1.03);
-}
-
-.gbtn:active {
-  transform: translateY(2px) scale(0.97);
   box-shadow:
-    inset 0 -2px 0 rgba(0, 0, 0, 0.25),
-    inset 0 2px 0 rgba(255, 255, 255, 0.3),
-    0 1px 0 rgba(0, 0, 0, 0.35);
+    0 var(--lip) 0 #111,
+    0 calc(var(--lip) + 3px) 5px rgba(0, 0, 0, 0.3),
+    inset 0 -4px 0 rgba(0, 0, 0, 0.2);
+  transition:
+    transform 0.07s ease-out,
+    box-shadow 0.07s ease-out,
+    filter 0.12s;
 }
-
-.gbtn:disabled {
-  filter: grayscale(0.85) brightness(0.8);
-  cursor: not-allowed;
-  transform: none;
-}
-
-.g-red { background: linear-gradient(#ff5468, #d6162c); }
-.g-green { background: linear-gradient(#5cf06a, #19b630); }
-.g-blue { background: linear-gradient(#4fc3ff, #1f77e8); }
-.g-yellow { background: linear-gradient(#ffe34d, #ffaa00); }
-.g-orange { background: linear-gradient(#ffb04d, #ff6a00); }
-.g-purple { background: linear-gradient(#c97dff, #8a2be2); }
-.g-pink { background: linear-gradient(#ff7ad9, #e21fa4); }
-.g-gray { background: linear-gradient(#9aa3b8, #5e677d); }
-.g-dark { background: linear-gradient(#3a4064, #1d2140); }
-.g-rainbow {
-  background: linear-gradient(90deg, #ff3d6e, #ffb321, #ffe14d, #3ddc6a, #38a8ff, #b45cff);
-}
-
-/* Studded texture overlay for big HUD tiles. Drawn as an overlay so it doesn't
- * replace the tile's colour gradient; the element must be positioned. */
-.studs::after {
+.gbtn::before {
   content: '';
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
+  z-index: -1;
+  left: 6%;
+  right: 6%;
+  top: 7%;
+  height: 42%;
+  border-radius: 10px 10px 6px 6px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.62) 0%, rgba(255, 255, 255, 0.08) 100%);
   pointer-events: none;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.2) 28%, transparent 30%);
-  background-size: 14px 14px;
-  mix-blend-mode: soft-light;
+}
+.gbtn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.07) saturate(1.05);
+}
+.gbtn:active:not(:disabled) {
+  transform: translateY(4px);
+  box-shadow:
+    0 1px 0 #111,
+    inset 0 -3px 0 rgba(0, 0, 0, 0.2);
+}
+.gbtn:disabled {
+  filter: saturate(0.35) brightness(0.92);
+  cursor: default;
+}
+
+.g-red { background: linear-gradient(180deg, #ff8a7a 0%, #ff3b3b 50%, #d4142a 100%); }
+.g-green { background: linear-gradient(180deg, #b6ff6a 0%, #57e83a 50%, #19b52a 100%); }
+.g-blue { background: linear-gradient(180deg, #8ff0ff 0%, #2fb8ff 50%, #1677ff 100%); }
+.g-yellow { background: linear-gradient(180deg, #fff27a 0%, #ffcb1f 48%, #ff9a0a 100%); }
+.g-orange { background: linear-gradient(180deg, #ffd99a 0%, #ffa53a 50%, #f07a12 100%); }
+.g-purple { background: linear-gradient(180deg, #ff9cf4 0%, #dc52ff 50%, #9a2bff 100%); }
+.g-pink { background: linear-gradient(180deg, #ffb8c6 0%, #ff5f86 50%, #d92b5a 100%); }
+.g-gray { background: linear-gradient(180deg, #e2e6ea 0%, #a9b0b8 55%, #7d858e 100%); }
+.g-dark { background: linear-gradient(180deg, #7c8cb0 0%, #4a5778 50%, #2c344d 100%); }
+.g-rainbow {
+  background: linear-gradient(90deg, #ff3b5c 0%, #ff9a1f 18%, #ffe53b 34%, #4ef05a 50%, #2fc6ff 66%, #6a5cff 82%, #ff4fd8 100%);
 }
 
 /* ---------------------------------------------------------------------------
- * Panels
+ * Panels: dark rounded frame, title riding the top edge, red X on the corner
  * ------------------------------------------------------------------------- */
 
 .panel {
   pointer-events: auto;
-  background: #161a33;
-  border: 4px solid #0b0d1c;
-  border-radius: 16px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
-  animation: pop-in 0.18s cubic-bezier(0.2, 1.4, 0.4, 1);
-}
-
-.panel-head {
-  border-radius: 10px 10px 0 0;
-  border-bottom: 4px solid #0b0d1c;
-}
-
-@keyframes pop-in {
-  from {
-    transform: scale(0.85);
-    opacity: 0;
-  }
+  background: linear-gradient(180deg, rgba(30, 33, 38, 0.95), rgba(18, 20, 24, 0.95));
+  border: 6px solid #0b0c0e;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 3px rgba(255, 255, 255, 0.08),
+    0 10px 30px rgba(0, 0, 0, 0.35);
 }
 
 .scroll-thin {
   scrollbar-width: thin;
   scrollbar-color: #ffffff55 transparent;
+}
+
+@keyframes pp-panel-in {
+  from {
+    transform: scale(0.85);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.03);
+    opacity: 1;
+  }
+  to {
+    transform: none;
+  }
+}
+.pp-panel-in {
+  animation: pp-panel-in 0.22s ease-out;
+}
+
+@keyframes pp-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-12%);
+  }
+}
+.pp-bounce {
+  animation: pp-bounce 0.8s ease-in-out infinite;
+  filter: drop-shadow(0 4px 0 rgba(0, 0, 0, 0.3));
+}
+
+@keyframes pp-fly {
+  0% {
+    transform: translate(-30px, 8px) rotate(-8deg);
+  }
+  50% {
+    transform: translate(30px, -10px) rotate(8deg);
+  }
+  100% {
+    transform: translate(-30px, 8px) rotate(-8deg);
+  }
+}
+.pp-loading-disc {
+  animation: pp-fly 2.4s ease-in-out infinite;
+  filter: drop-shadow(0 8px 0 rgba(0, 0, 0, 0.25));
+}
+
+/* The TRAIN and BOOST buttons breathe, so they read as the thing to press. */
+/* Rainbow rays behind the gift and pass stickers (from Muscle to Push Boulder). */
+@keyframes pp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.pp-spin {
+  animation: pp-spin 9s linear infinite;
+}
+
+/* Things only shown where the screen has room for them (not landscape phones, not
+   narrow portrait phones). */
+@media (max-height: 560px), (max-width: 520px) {
+  .pp-tall-only {
+    display: none !important;
+  }
+}
+
+@keyframes pp-pulse {
+  0%,
+  100% {
+    filter: brightness(1) drop-shadow(0 0 0 rgba(120, 255, 90, 0));
+  }
+  50% {
+    filter: brightness(1.12) drop-shadow(0 0 calc(var(--px) * 22) rgba(120, 255, 90, 0.85));
+  }
+}
+.pp-pulse {
+  animation: pp-pulse 1.1s ease-in-out infinite;
 }
 
 /* ---------------------------------------------------------------------------
@@ -181,7 +391,7 @@ canvas {
   top: 0;
   pointer-events: none;
   will-change: transform;
-  font-family: 'Lilita One', 'Arial Black', system-ui, sans-serif;
+  font-family: 'Fredoka One', 'Arial Black', system-ui, sans-serif;
   white-space: nowrap;
 }
 
@@ -218,66 +428,104 @@ canvas {
 
 .wl-bar {
   position: relative;
-  width: 64px;
-  height: 13px;
-  border-radius: 7px;
-  background: #1b1b26;
-  border: 2px solid #0a0a12;
+  width: 70px;
+  height: 14px;
+  border-radius: 8px;
+  background: rgba(14, 18, 36, 0.82);
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 2px 5px rgba(5, 8, 22, 0.5);
   overflow: hidden;
+}
+
+/* Health fill: green, then amber, then red as it drops. Enemies are orange-red. */
+.wl-hp-sm .wl-bar {
+  width: 52px;
+  height: 12px;
+}
+.wl-hp-sm .wl-num {
+  font-size: 9.5px;
+  line-height: 10px;
 }
 
 .wl-fill {
   position: absolute;
   inset: 0 auto 0 0;
-  background: linear-gradient(#7bff7b, #1fcf2f);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #8dff8d 0%, #2fd650 55%, #16a33a 100%);
+  transition: width 0.12s ease-out;
 }
-
-.wl-fill.wl-enemy {
-  background: linear-gradient(#ffb44d, #ff6a00);
+.wl-fill::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: 1.5px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.42);
 }
-
+.wl-fill.wl-mid {
+  background: linear-gradient(180deg, #ffe97a 0%, #ffc425 55%, #e89a00 100%);
+}
+.wl-fill.wl-low,
 .wl-fill.wl-enemy-low {
-  background: linear-gradient(#ff6b6b, #d6162c);
+  background: linear-gradient(180deg, #ff8a8a 0%, #ff3b4f 55%, #cc1830 100%);
+}
+.wl-fill.wl-enemy {
+  background: linear-gradient(180deg, #ffbf6b 0%, #ff8a1f 55%, #e05a00 100%);
 }
 
 .wl-num {
   position: relative;
   display: block;
   text-align: center;
-  font-size: 11px;
-  line-height: 10px;
+  font-size: 10.5px;
+  line-height: 11px;
+  letter-spacing: 0.02em;
   color: #fff;
-  text-shadow:
-    1px 1px 0 #000,
-    -1px 1px 0 #000,
-    1px -1px 0 #000,
-    -1px -1px 0 #000;
+  text-shadow: 0 1px 2px rgba(5, 8, 22, 0.9);
 }
 
 .wl-name {
   text-align: center;
   color: #fff;
-  font-size: 15px;
-  text-shadow:
-    0 2px 0 rgba(0, 0, 0, 0.7),
-    1px 1px 0 rgba(0, 0, 0, 0.7),
-    -1px 1px 0 rgba(0, 0, 0, 0.7);
-  opacity: 0.92;
+  font-size: 17px;
+  line-height: 1.05;
+  -webkit-text-stroke: 3px #0d1430;
+  paint-order: stroke fill;
+  filter: drop-shadow(0 2px 2px rgba(5, 8, 22, 0.45));
 }
 
 .wl-sub {
-  font-size: 11px;
-  color: #ffe14d;
+  font-size: 12px;
+  color: #ffe36b;
+  -webkit-text-stroke: 2.2px #0d1430;
+  paint-order: stroke fill;
 }
 
+/* Speech bubble with a tail, in the kit's chunky outline. */
 .wl-bubble {
-  background: rgba(255, 255, 255, 0.92);
-  color: #2a2a3a;
-  font-family: system-ui, sans-serif;
+  position: absolute;
+  background: #fff;
+  color: #1b1b2a;
   font-size: 15px;
-  padding: 6px 12px;
+  padding: 6px 13px;
+  border: 3px solid #141428;
   border-radius: 14px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.3);
+}
+.wl-bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -10px;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  background: #fff;
+  border-right: 3px solid #141428;
+  border-bottom: 3px solid #141428;
+  transform: rotate(45deg);
 }
 
 .wl-pop {
@@ -325,10 +573,6 @@ canvas {
   content: '🏆';
 }
 
-.wl-pop-candy {
-  color: #ff9a1f;
-}
-
 /* ---------------------------------------------------------------------------
  * HUD animations
  * ------------------------------------------------------------------------- */
@@ -349,6 +593,49 @@ canvas {
     transform: translate(-50%, -40px) scale(1);
     opacity: 0;
   }
+}
+
+/* The win celebration: pops in, holds, floats off (centred on its anchor). */
+@keyframes celebrate {
+  0% {
+    transform: translateX(-50%) scale(0.3);
+    opacity: 0;
+  }
+  10% {
+    transform: translateX(-50%) scale(1.15);
+    opacity: 1;
+  }
+  16% {
+    transform: translateX(-50%) scale(1);
+  }
+  80% {
+    transform: translateX(-50%) translateY(0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(-50%) translateY(-40px) scale(0.9);
+    opacity: 0;
+  }
+}
+.anim-celebrate {
+  animation: celebrate 3s ease-out forwards;
+}
+
+@keyframes confetti {
+  0% {
+    transform: translate(0, 0) rotate(0deg) scale(0.4);
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--dx), calc(var(--dy) + 120px)) rotate(var(--rot)) scale(1);
+    opacity: 0;
+  }
+}
+.anim-confetti {
+  animation: confetti 1.4s cubic-bezier(0.2, 0.7, 0.4, 1) forwards;
 }
 
 .anim-reward {
@@ -424,6 +711,8 @@ canvas {
   }
   100% {
     transform: scale(1) rotate(0);
+    /* Stated, or the card fades back to its starting inline opacity: 0. */
+    opacity: 1;
   }
 }
 

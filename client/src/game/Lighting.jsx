@@ -59,7 +59,7 @@ export function Lighting({ theme }) {
 
   return (
     <>
-      <hemisphereLight args={[LIGHTS.hemiSky, LIGHTS.hemiGround, theme.hemi]} />
+      <hemisphereLight args={[theme.hemiSky, theme.hemiGround, theme.hemi]} />
       <directionalLight
         // Remount when the shadow map size changes; three won't resize a live one.
         key={`${q.shadows}-${q.shadowMapSize}`}

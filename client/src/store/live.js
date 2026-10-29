@@ -77,8 +77,6 @@ export const live = {
   /** World-space effects requested from outside the frame loop. */
   fx: [],
 
-  /** Pumpkin id -> time (ms) it becomes collectible again. */
-  pumpkins: {},
   /** Current run: { world, cleared } - gates read this. */
   run: null,
 }

@@ -1,4 +1,13 @@
-import { CylinderGeometry, ExtrudeGeometry, Float32BufferAttribute, LatheGeometry, Shape, Vector2 } from 'three'
+import {
+  BoxGeometry,
+  CylinderGeometry,
+  ExtrudeGeometry,
+  Float32BufferAttribute,
+  LatheGeometry,
+  OctahedronGeometry,
+  Shape,
+  Vector2,
+} from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
 /**
@@ -11,7 +20,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
  *   bolt        - a metal-rimmed centre cap with an emblem in the secondary colour
  *
  * Built at radius ~1 with the tip at y = 0, then scaled per instance. Each vertex
- * carries `aPart`: 0 = primary colour, 1 = secondary colour, 2 = metal. The instanced
+ * carries `aPart`: 0 primary, 1 secondary, 2 metal, 3 accent, 4 dark. The instanced
  * material (spinnerBatch.js) tints and shades by part, so one geometry draws every
  * colour variant of its family in a single draw call.
  *
@@ -24,6 +33,8 @@ export const FAMILIES = ['disc', 'saw', 'blade', 'dome', 'star']
 const PRIMARY = 0
 const SECONDARY = 1
 const METAL = 2
+const ACCENT = 3
+const DARK = 4
 
 /** Converts to non-indexed, drops UVs, stamps the part id. */
 function tag(geometry, part) {
@@ -127,7 +138,7 @@ function driver() {
       [0.16, 0.19],
       [0.19, 0.23],
     ],
-    10,
+    8,
   )
   const collar = lathe(
     [
@@ -137,7 +148,7 @@ function driver() {
       [0.29, 0.35],
       [0.2, 0.37],
     ],
-    12,
+    10,
   )
   return [tag(tip, METAL), tag(collar, SECONDARY)]
 }
@@ -154,7 +165,7 @@ function wheel(r = 0.82) {
         [r - 0.04, 0.46],
         [0.3, 0.47],
       ],
-      20,
+      16,
     ),
     METAL,
   )
@@ -183,79 +194,201 @@ function bolt(y, r = 0.3) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Small details: tooth caps, rivets, gems
+ * ------------------------------------------------------------------------- */
+
+/**
+ * World angle of tooth `i` of an `n`-tooth shape. Shapes are drawn in the XY plane and
+ * laid flat by slab() (shape y becomes world -z), which mirrors the angle.
+ */
+const toothAngle = (i, n) => -((i + 0.5) / n) * Math.PI * 2
+
+/** A small box at radius r, angle a, with its length running round the ring. */
+function radialBox(a, r, y, w, h, d) {
+  const g = new BoxGeometry(w, h, d)
+  g.rotateY(Math.PI / 2 - a)
+  g.translate(Math.cos(a) * r, y + h / 2, Math.sin(a) * r)
+  return g
+}
+
+/** Bright caps on the tips of an n-tooth ring. */
+function toothCaps(n, r, y, part = ACCENT) {
+  return Array.from({ length: n }, (_, i) => tag(radialBox(toothAngle(i, n), r, y, 0.17, 0.035, 0.12), part))
+}
+
+/** A ring of metal rivets. */
+function rivets(n, r, y, size = 0.07) {
+  return Array.from({ length: n }, (_, i) => {
+    const a = (i / n) * Math.PI * 2
+    return tag(radialBox(a, r, y, size, size * 0.6, size), METAL)
+  })
+}
+
+/** Faceted gems (octahedra) round a ring, at the given angles. */
+function gems(angles, r, y, size, part) {
+  return angles.map((a) => {
+    const g = new OctahedronGeometry(size, 0)
+    g.scale(1, 0.7, 1)
+    g.translate(Math.cos(a) * r, y + size * 0.7, Math.sin(a) * r)
+    return tag(g, part)
+  })
+}
+
+/* ---------------------------------------------------------------------------
  * Families
+ *
+ * Parts: PRIMARY (the spinner's colour), SECONDARY (its second colour), METAL,
+ * ACCENT (a light tint of the primary, for highlights) and DARK (a deep shade of the
+ * primary, for undersides and outlines). Five tones from the two colours each
+ * spinner defines.
  * ------------------------------------------------------------------------- */
 
 const builders = {
-  /** Gear ring with a raised inner ring - the classic "Basic Spinner". */
+  /** Gear ring with bright tooth caps and a riveted inner ring - the classic spinner. */
   disc() {
-    const ring = slab(gearShape(14, 0.8, 1.0, 0.55), 0.17, 0.44)
-    const inner = lathe(
-      [
-        [0.34, 0.58],
-        [0.66, 0.58],
-        [0.72, 0.62],
-        [0.68, 0.67],
-        [0.36, 0.68],
-      ],
-      18,
-    )
-    return [...driver(), wheel(0.8), tag(ring, PRIMARY), tag(inner, SECONDARY), ...bolt(0.66)]
+    const n = 14
+    return [
+      ...driver(),
+      wheel(0.8),
+      tag(slab(gearShape(n, 0.78, 1.04, 0.55), 0.06, 0.41, 0), DARK),
+      tag(slab(gearShape(n, 0.8, 1.0, 0.55), 0.17, 0.45), PRIMARY),
+      ...toothCaps(n, 0.95, 0.62),
+      tag(
+        lathe(
+          [
+            [0.34, 0.58],
+            [0.66, 0.58],
+            [0.72, 0.62],
+            [0.68, 0.68],
+            [0.36, 0.69],
+          ],
+          18,
+        ),
+        SECONDARY,
+      ),
+      ...rivets(6, 0.53, 0.68),
+      ...bolt(0.68),
+    ]
   },
 
-  /** Wide, thin saw blade over a domed body. */
+  /** Two stacked saw blades (one light, one in colour) over a domed body. */
   saw() {
-    const blade = slab(sawShape(18, 0.84, 1.08), 0.09, 0.45, 0.02)
-    const body = lathe(
-      [
-        [0.3, 0.44],
-        [0.8, 0.46],
-        [0.84, 0.52],
-        [0.74, 0.6],
-        [0.4, 0.64],
-      ],
-      20,
-    )
-    return [...driver(), wheel(0.78), tag(blade, PRIMARY), tag(body, SECONDARY), ...bolt(0.62)]
+    const n = 18
+    const top = slab(sawShape(n, 0.72, 0.94), 0.06, 0.52, 0)
+    top.rotateY(Math.PI / n)
+    return [
+      ...driver(),
+      wheel(0.78),
+      tag(slab(sawShape(n, 0.84, 1.08), 0.08, 0.44, 0.02), PRIMARY),
+      tag(top, ACCENT),
+      tag(
+        lathe(
+          [
+            [0.3, 0.5],
+            [0.66, 0.52],
+            [0.7, 0.58],
+            [0.6, 0.66],
+            [0.36, 0.69],
+          ],
+          20,
+        ),
+        SECONDARY,
+      ),
+      ...rivets(5, 0.48, 0.66),
+      ...bolt(0.68),
+    ]
   },
 
-  /** Three sweeping blades round a triangular core. */
+  /** Three sweeping blades, outlined underneath, with gems at their roots. */
   blade() {
     const parts = [...driver(), wheel(0.72)]
     const shape = bladeShape()
     for (let i = 0; i < 3; i += 1) {
-      const b = slab(shape, 0.15, 0.44)
-      b.rotateY((i * Math.PI * 2) / 3)
-      parts.push(tag(b, PRIMARY))
+      const turn = (i * Math.PI * 2) / 3
+      const under = slab(shape, 0.06, 0.41, 0)
+      under.scale(1.06, 1, 1.06)
+      under.rotateY(turn)
+      const main = slab(shape, 0.15, 0.44)
+      main.rotateY(turn)
+      const stripe = slab(shape, 0.04, 0.59, 0)
+      stripe.scale(0.82, 1, 0.82)
+      stripe.rotateY(turn)
+      parts.push(tag(under, DARK), tag(main, PRIMARY), tag(stripe, ACCENT))
     }
     const core = slab(starShape(3, 0.36, 0.56), 0.13, 0.52, 0.03)
-    parts.push(tag(core, SECONDARY), ...bolt(0.64, 0.26))
+    parts.push(tag(core, SECONDARY))
+    parts.push(...gems([0, 1, 2].map((i) => -Math.PI / 2 - (i * Math.PI * 2) / 3), 0.44, 0.63, 0.09, ACCENT))
+    parts.push(...bolt(0.65, 0.26))
     return parts
   },
 
-  /** Saucer: a smooth domed shell with a bumped rim. */
+  /** Saucer: a panelled shell with a bumped rim and a glassy cockpit on top. */
   dome() {
-    const shell = lathe(
+    const cockpit = lathe(
       [
-        [0.3, 0.42],
-        [0.9, 0.44],
-        [1.0, 0.5],
-        [0.96, 0.56],
-        [0.72, 0.62],
-        [0.5, 0.7],
-        [0.34, 0.72],
+        [0.44, 0.7],
+        [0.4, 0.8],
+        [0.28, 0.9],
+        [0.12, 0.95],
+        [0, 0.96],
       ],
-      24,
+      18,
     )
-    const bumps = slab(gearShape(8, 0.86, 1.04, 0.32), 0.1, 0.46, 0.025)
-    return [...driver(), wheel(0.7), tag(shell, PRIMARY), tag(bumps, SECONDARY), ...bolt(0.7, 0.32)]
+    const cockpitRim = lathe(
+      [
+        [0.5, 0.68],
+        [0.5, 0.72],
+        [0.42, 0.74],
+      ],
+      18,
+    )
+    return [
+      ...driver(),
+      wheel(0.7),
+      tag(
+        lathe(
+          [
+            [0.86, 0.4],
+            [1.03, 0.43],
+            [1.03, 0.47],
+            [0.9, 0.48],
+          ],
+          24,
+        ),
+        DARK,
+      ),
+      tag(
+        lathe(
+          [
+            [0.3, 0.42],
+            [0.9, 0.44],
+            [1.0, 0.5],
+            [0.96, 0.56],
+            [0.72, 0.62],
+            [0.5, 0.69],
+          ],
+          24,
+        ),
+        PRIMARY,
+      ),
+      tag(slab(gearShape(8, 0.86, 1.05, 0.32), 0.1, 0.46, 0.025), SECONDARY),
+      tag(cockpitRim, METAL),
+      tag(cockpit, ACCENT),
+    ]
   },
 
-  /** Five-pointed star with an inner star. */
+  /** Five-pointed star, outlined, with an inner star and gems on its points. */
   star() {
-    const star = slab(starShape(5, 0.56, 1.05), 0.17, 0.43)
-    const inner = slab(starShape(5, 0.3, 0.58), 0.08, 0.58, 0.02)
-    return [...driver(), wheel(0.62), tag(star, PRIMARY), tag(inner, SECONDARY), ...bolt(0.64, 0.24)]
+    const points = Array.from({ length: 5 }, (_, i) => -Math.PI / 2 - (i / 5) * Math.PI * 2)
+    return [
+      ...driver(),
+      wheel(0.62),
+      tag(slab(starShape(5, 0.6, 1.11), 0.06, 0.41, 0), DARK),
+      tag(slab(starShape(5, 0.56, 1.05), 0.17, 0.44), PRIMARY),
+      tag(slab(starShape(5, 0.3, 0.58), 0.08, 0.6, 0), ACCENT),
+      ...gems(points, 0.8, 0.6, 0.1, SECONDARY),
+      ...bolt(0.66, 0.24),
+    ]
   },
 }
 

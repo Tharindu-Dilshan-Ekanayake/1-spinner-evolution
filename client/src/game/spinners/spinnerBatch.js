@@ -2,6 +2,7 @@ import {
   Color,
   DynamicDrawUsage,
   Euler,
+  Group,
   InstancedBufferAttribute,
   InstancedMesh,
   Matrix4,
@@ -23,19 +24,27 @@ import { FAMILIES, familyGeometry, lodGeometry } from './spinnerGeometry'
  *
  * Per-instance data: matrix, primary colour, secondary colour, and fx
  * (x = glow, y = hit flash, z = golden, w = unused).
+ *
+ * Only the cheap LOD puck is built at load. Each family's mesh is built the first time
+ * one is drawn, at most one per frame (until then those spinners draw as the puck):
+ * building all five up front cost about a third of a second of startup on a phone.
  */
 
 const MAX_PER_FAMILY = 220
 const MAX_LOD = 400
-const LOD_DISTANCE = 42
 
 /**
- * Glossy plastic for the coloured parts, polished metal for the tip, wheel and bolt.
- * There is no environment map (too costly), so metal gets its shine from a fresnel
- * rim light instead: surfaces seen edge-on light up, which reads as
- * chrome and gives every spinner a crisp outline against the floor.
+ * Glossy plastic for the coloured parts, polished metal for the tip, wheel, rivets and
+ * bolt. Five tones come from each spinner's two colours (see spinnerGeometry parts),
+ * and the attack ring's top face gets a panel pattern and a pin-stripe, so even a
+ * plain one-colour spinner has detail.
+ *
+ * A fake studio reflection (sky, floor, a strip light) makes the plastic glossy and the
+ * metal read as chrome, and a rim light outlines every spinner against the floor. (No
+ * real environment map: baking one and recompiling for it froze the game for over a
+ * second after load; this costs a few instructions and works on every preset.)
  */
-const material = new MeshStandardMaterial({ roughness: 0.32, metalness: 0.12 })
+const material = new MeshStandardMaterial({ roughness: 0.3, metalness: 0.12 })
 material.onBeforeCompile = (shader) => {
   shader.vertexShader = shader.vertexShader
     .replace(
@@ -47,13 +56,22 @@ material.onBeforeCompile = (shader) => {
       attribute vec4 iFx;
       varying vec3 vTint;
       varying vec4 vFx;
-      varying float vMetal;`,
+      varying float vMetal;
+      varying float vPrimary;
+      varying vec3 vLocal;`,
     )
     .replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
-      vMetal = step(1.5, aPart);
-      vTint = aPart < 0.5 ? iColA : (aPart < 1.5 ? iColB : vec3(0.86, 0.88, 0.95));
+      vMetal = (aPart > 1.5 && aPart < 2.5) ? 1.0 : 0.0;
+      vPrimary = aPart < 0.5 ? 1.0 : 0.0;
+      vTint = aPart < 0.5 ? iColA
+        : aPart < 1.5 ? iColB
+        : aPart < 2.5 ? vec3(0.86, 0.88, 0.95)
+        : aPart < 3.5 ? mix(iColA, vec3(1.0), 0.5)
+        : iColA * 0.32;
+      // Model-space position and up-ness, for the panel pattern on top faces.
+      vLocal = vec3(position.xz, objectNormal.y);
       vFx = iFx;`,
     )
   shader.fragmentShader = shader.fragmentShader
@@ -62,22 +80,32 @@ material.onBeforeCompile = (shader) => {
       `#include <common>
       varying vec3 vTint;
       varying vec4 vFx;
-      varying float vMetal;`,
+      varying float vMetal;
+      varying float vPrimary;
+      varying vec3 vLocal;`,
     )
     .replace(
       '#include <roughnessmap_fragment>',
       `#include <roughnessmap_fragment>
-      roughnessFactor = mix(roughnessFactor, 0.18, vMetal);`,
+      roughnessFactor = mix(roughnessFactor, 0.16, vMetal);`,
     )
     .replace(
       '#include <metalnessmap_fragment>',
       `#include <metalnessmap_fragment>
-      metalnessFactor = mix(metalnessFactor, 0.45, vMetal);`,
+      metalnessFactor = mix(metalnessFactor, 0.6, vMetal);`,
     )
     .replace(
       '#include <color_fragment>',
       `#include <color_fragment>
       vec3 tint = vTint;
+      if (vPrimary > 0.5 && vLocal.z > 0.6) {
+        // Six light panels round the top, and a dark pin-stripe ring.
+        float sector = step(0.5, fract(atan(vLocal.y, vLocal.x) * 0.9549));
+        float r = length(vLocal.xy);
+        float stripe = 1.0 - smoothstep(0.012, 0.03, abs(r - 0.87));
+        tint = mix(tint, tint * 1.25 + 0.05, sector * 0.5);
+        tint = mix(tint, tint * 0.35, stripe);
+      }
       float lum = dot(tint, vec3(0.299, 0.587, 0.114));
       tint = mix(tint, vec3(1.0, 0.7, 0.12) * (0.6 + lum), vFx.z * 0.72);
       diffuseColor.rgb *= tint;`,
@@ -86,8 +114,19 @@ material.onBeforeCompile = (shader) => {
       '#include <emissivemap_fragment>',
       `#include <emissivemap_fragment>
       totalEmissiveRadiance += vTint * vFx.x * 0.5 + vec3(vFx.y) + vec3(1.0, 0.75, 0.25) * vFx.z * 0.15;
-      float rim = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3.0);
-      totalEmissiveRadiance += (vMetal > 0.5 ? vec3(0.55) : vTint * 0.35 + 0.08) * rim;`,
+      // A fake studio around the spinner, reflected: sky above, warm floor below and a
+      // bright strip light overhead. No texture, so it costs nothing on any preset.
+      vec3 viewDir = normalize(vViewPosition);
+      float facing = clamp(dot(normal, viewDir), 0.0, 1.0);
+      float fres = pow(1.0 - facing, 2.0);
+      vec3 refl = reflect(-viewDir, normal);
+      float up = dot(refl, normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz));
+      vec3 studio = mix(vec3(0.42, 0.34, 0.27), vec3(0.78, 0.9, 1.0), smoothstep(-0.25, 0.35, up));
+      studio += vec3(1.0) * smoothstep(0.86, 0.97, up);
+      totalEmissiveRadiance += studio * mix(0.05 + 0.2 * fres, 0.3 + 0.4 * fres, vMetal);
+      // Rim light: outlines every spinner against the floor.
+      float rim = pow(1.0 - facing, 3.0);
+      totalEmissiveRadiance += (vMetal > 0.5 ? vec3(0.35) : vTint * 0.3 + 0.06) * rim;`,
     )
 }
 
@@ -111,10 +150,26 @@ function makeMesh(geometry, max) {
   return { mesh, max, count: 0, colA: geo.attributes.iColA, colB: geo.attributes.iColB, fx: geo.attributes.iFx }
 }
 
-const batches = {}
-for (const f of FAMILIES) batches[f] = makeMesh(familyGeometry(f), MAX_PER_FAMILY)
-batches.lod = makeMesh(lodGeometry(), MAX_LOD)
-const batchList = Object.values(batches)
+const batches = { lod: makeMesh(lodGeometry(), MAX_LOD) }
+const batchList = [batches.lod]
+/** Every batch mesh lives here; family meshes join it as they are built. */
+const group = new Group()
+group.add(batches.lod.mesh)
+const KNOWN = new Set(FAMILIES)
+let builtThisFrame = false
+
+function batchFor(family) {
+  const key = KNOWN.has(family) ? family : 'disc'
+  let b = batches[key]
+  if (b) return b
+  if (builtThisFrame) return batches.lod
+  builtThisFrame = true
+  b = makeMesh(familyGeometry(key), MAX_PER_FAMILY)
+  batches[key] = b
+  batchList.push(b)
+  group.add(b.mesh)
+  return b
+}
 
 const _m = new Matrix4()
 const _p = new Vector3()
@@ -122,6 +177,7 @@ const _q = new Quaternion()
 const _s = new Vector3()
 const _e = new Euler()
 const _cam = new Vector3()
+let _lod2 = 42 * 42
 
 /* ---------------------------------------------------------------------------
  * Colour palettes (created once per spinner type, then reused every frame)
@@ -157,10 +213,14 @@ export function customPalette(key, a, b) {
  * ------------------------------------------------------------------------- */
 
 export const spinnerBatch = {
-  meshes: batchList.map((b) => b.mesh),
+  /** Add this to the scene once; it holds every batch mesh. */
+  group,
 
-  begin(camera) {
+  /** @param lodDistance  beyond this, spinners draw as the cheap puck */
+  begin(camera, lodDistance = 42) {
     _cam.copy(camera.position)
+    _lod2 = lodDistance * lodDistance
+    builtThisFrame = false
     for (let i = 0; i < batchList.length; i += 1) batchList[i].count = 0
   },
 
@@ -173,8 +233,8 @@ export const spinnerBatch = {
   push(family, x, y, z, angle, tilt, tiltDir, scale, pal, glow = 0, flash = 0, golden = false) {
     const dx = x - _cam.x
     const dz = z - _cam.z
-    const far = dx * dx + dz * dz > LOD_DISTANCE * LOD_DISTANCE
-    const b = far ? batches.lod : batches[family] || batches.disc
+    const far = dx * dx + dz * dz > _lod2
+    const b = far ? batches.lod : batchFor(family)
     if (b.count >= b.max) return
     const i = b.count
     b.count += 1

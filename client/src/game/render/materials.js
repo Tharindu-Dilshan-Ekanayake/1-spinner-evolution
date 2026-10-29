@@ -43,6 +43,28 @@ export function studMaterial(color) {
   return m
 }
 
+const decalCache = new Map()
+
+/**
+ * Studded ground surface lying under other flat layers (the island top, path borders,
+ * the shop apron). These sit only centimetres apart - too close for the depth buffer at
+ * a distance - so each is pushed `depth` steps AWAY from the camera by polygon offset:
+ * the higher layer always wins, and nothing flickers. The top layer (the paths) keeps
+ * its true depth, so feet and props standing on it are never cut off by the floor.
+ */
+export function decalMaterial(color, depth) {
+  const key = `${color}:${depth}`
+  let m = decalCache.get(key)
+  if (!m) {
+    m = new MeshLambertMaterial({ map: getStudTexture(), color: new Color(color) })
+    m.polygonOffset = true
+    m.polygonOffsetFactor = depth
+    m.polygonOffsetUnits = 4 * depth
+    decalCache.set(key, m)
+  }
+  return m
+}
+
 /** Smooth plastic, for props. Lambert is cheaper and reads the same at a distance. */
 export function plainMaterial(color) {
   let m = plainCache.get(color)

@@ -11,19 +11,31 @@ import { create } from 'zustand'
 
 export const PRESETS = {
   LOW: {
-    dpr: 1,
+    // The frame-rate savers stay off (shadows, particles, glows, fewer avatars, 1x
+    // resolution on phones); the cheap things that make a scene look sharp stay on:
+    // MSAA (almost free on phone GPUs), 512px studs, a little supersampling on desktop.
+    dpr: typeof navigator !== 'undefined' && isMobileDevice() ? 1 : [1, 1.25],
     shadows: false,
     shadowMapSize: 0,
     particles: false,
     maxParticles: 0,
-    viewDistance: 95,
-    clouds: 0,
+    viewDistance: 110,
+    clouds: 3,
     remoteAvatars: 3,
-    textureSize: 256,
+    textureSize: 512,
+    // Sign and board text atlases: the phone texture budget is 512px.
+    signAtlas: 512,
     decor: 0.4,
     glow: false,
+    // Fire / lightning on spinners (spinnerElement.js): flames and arcs per spinner, 0-3.
+    // A phone gets the light version; it's a handful of sprites in the one shared batch.
+    elements: 1,
     petsPerRemote: 3,
-    antialias: false,
+    antialias: true,
+    // Spinners further than this draw as a cheap puck (keeps a full team under the
+    // 100k-triangle phone budget).
+    spinnerLod: 24,
+    champions: 1,
   },
   MEDIUM: {
     dpr: [1, 1.5],
@@ -35,10 +47,14 @@ export const PRESETS = {
     clouds: 10,
     remoteAvatars: 6,
     textureSize: 512,
+    signAtlas: 1024,
     decor: 0.75,
     glow: true,
+    elements: 2,
     petsPerRemote: 6,
     antialias: true,
+    spinnerLod: 36,
+    champions: 2,
   },
   HIGH: {
     dpr: [1, 2],
@@ -51,19 +67,25 @@ export const PRESETS = {
     clouds: 18,
     remoteAvatars: 10,
     textureSize: 512,
+    signAtlas: 1024,
     decor: 1,
     glow: true,
+    elements: 3,
     petsPerRemote: 11,
     antialias: true,
+    spinnerLod: 48,
+    champions: 3,
   },
 }
 
 const ORDER = ['LOW', 'MEDIUM', 'HIGH']
 const STORAGE_KEY = 'spinner_quality'
 
-export function isMobile() {
+function isMobileDevice() {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1
 }
+
+export const isMobile = isMobileDevice
 
 function detect() {
   const cores = navigator.hardwareConcurrency || 4

@@ -8,7 +8,6 @@ import { Panel } from '../common'
 function RewardText({ reward }) {
   const parts = []
   if (reward.wins) parts.push(`🏆 ${formatNumber(reward.wins)}`)
-  if (reward.candy) parts.push(`🍬 ${reward.candy}`)
   if (reward.potion) parts.push(`${POTIONS[reward.potion].icon} ${POTIONS[reward.potion].name}`)
   return <span>{parts.join(' + ')}</span>
 }
@@ -24,7 +23,7 @@ export default function GiftsPanel() {
   const claimed = profile.gifts.claimed || []
 
   return (
-    <Panel title="Free Gifts" icon="🎁" color="g-green" wide onClose={close}>
+    <Panel title="Free Gifts" icon="gift" wide onClose={close}>
       <div className="stroke mb-2 text-center text-lg">Play to unlock gifts! Played today: {formatTime(seconds)}</div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
         {GIFTS.map((g) => {
